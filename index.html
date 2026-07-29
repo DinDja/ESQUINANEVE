@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Downhill Rush — Esqui na Neve</title>
+<title>Downhill Rush 3D — Esqui na Neve</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -20,7 +20,7 @@
   .hud{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;padding:18px 22px;z-index:10}
   .hud-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
   .stat{
-    background:linear-gradient(180deg,rgba(13,37,64,.78),rgba(6,18,31,.78));
+    background:linear-gradient(180deg,rgba(13,37,64,.75),rgba(6,18,31,.75));
     border:1px solid rgba(191,233,255,.18);
     backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
     border-radius:14px;padding:10px 16px;min-width:96px;
@@ -110,13 +110,13 @@
   <div class="boost-bar"><div class="boost-fill" id="boostFill"></div></div>
 </div>
 
-<div class="hint" id="hint" style="display:none">Espaço para impulso • P para pausar</div>
+<div class="hint" id="hint" style="display:none">A/D ou Mouse para mover • Espaço para impulso</div>
 <div class="toast" id="toast"></div>
 
 <div class="overlay" id="menu">
-  <h1 class="title">DOWNHILL<br>RUSH</h1>
+  <h1 class="title">DOWNHILL<br>RUSH 3D</h1>
   <div class="subtitle">Esqui Extremo</div>
-  <p class="desc">Desça a montanha gelada desviando de árvores e pedras. Passe entre os portões azuis para somar pontos, colete estrelas para carregar o impulso e sobreviva o maior tempo possível.</p>
+  <p class="desc">Desça a montanha gelada em 3D! Desvie de árvores e pedras, passe pelos portões azuis para somar pontos e colete estrelas para ativar o impulso turbo.</p>
   <div class="controls-grid">
     <div class="ctrl"><div class="keys">A / ←</div><div class="desc-small">Esquerda</div></div>
     <div class="ctrl"><div class="keys">D / →</div><div class="desc-small">Direita</div></div>
@@ -136,48 +136,70 @@
   <button class="btn" id="restartBtn">Descer Novamente</button>
 </div>
 
-<script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
 /* ============================================================
-   DOWNHILL RUSH
+   DOWNHILL RUSH 3D - Three.js
    ============================================================ */
 
-// --- Segurança: localStorage com fallback ---
-function safeGetBest(){
-  try { return parseInt(localStorage.getItem('downhill_best') || '0', 10) || 0; }
-  catch(e){ return 0; }
-}
-function safeSetBest(v){
-  try { localStorage.setItem('downhill_best', String(v)); } catch(e){}
-}
+// --- Storage Safe ---
+function safeGetBest(){ try { return parseInt(localStorage.getItem('downhill3d_best') || '0', 10) || 0; } catch(e){ return 0; } }
+function safeSetBest(v){ try { localStorage.setItem('downhill3d_best', String(v)); } catch(e){} }
 
-// --- Canvas ---
+// --- Canvas & Renderer ---
 const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-function resize(){
-  W = window.innerWidth;
-  H = window.innerHeight;
-  canvas.width = W * DPR;
-  canvas.height = H * DPR;
-  canvas.style.width = W + 'px';
-  canvas.style.height = H + 'px';
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-}
-window.addEventListener('resize', resize);
-resize();
+// --- Scene & Camera ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fc4e8);
+scene.fog = new THREE.Fog(0x9ccbf0, 40, 140);
 
-// --- Áudio ---
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 300);
+camera.position.set(0, 6, 12);
+camera.lookAt(0, 0, 0);
+
+// --- Lights ---
+const ambientLight = new THREE.AmbientLight(0x9ccbf0, 0.6);
+scene.add(ambientLight);
+
+const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
+sunLight.position.set(30, 50, 20);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.width = 2048;
+sunLight.shadow.mapSize.height = 2048;
+sunLight.shadow.camera.near = 0.5;
+sunLight.shadow.camera.far = 150;
+sunLight.shadow.camera.left = -40;
+sunLight.shadow.camera.right = 40;
+sunLight.shadow.camera.top = 40;
+sunLight.shadow.camera.bottom = -40;
+sunLight.shadow.bias = -0.0005;
+scene.add(sunLight);
+
+const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x88aacc, 0.4);
+scene.add(hemisphereLight);
+
+// --- Audio ---
 let audioCtx = null;
-function initAudio(){
-  if(audioCtx) return;
-  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){}
-}
+function initAudio(){ if(!audioCtx){ try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} } }
 function beep(freq=440, dur=0.08, type='sine', vol=0.15){
   if(!audioCtx) return;
   try {
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
     o.type = type; o.frequency.value = freq;
     g.gain.setValueAtTime(vol, audioCtx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
@@ -188,8 +210,7 @@ function beep(freq=440, dur=0.08, type='sine', vol=0.15){
 function whoosh(down=true){
   if(!audioCtx) return;
   try {
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
     o.type = 'sawtooth';
     const f1 = down ? 600 : 200, f2 = down ? 120 : 700;
     o.frequency.setValueAtTime(f1, audioCtx.currentTime);
@@ -207,24 +228,21 @@ function crashSound(){
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
     for(let i=0;i<bufferSize;i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/bufferSize, 2);
-    const noise = audioCtx.createBufferSource();
-    noise.buffer = buffer;
-    const g = audioCtx.createGain();
-    g.gain.value = 0.25;
-    const filter = audioCtx.createBiquadFilter();
-    filter.type = 'lowpass'; filter.frequency.value = 800;
+    const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
+    const g = audioCtx.createGain(); g.gain.value = 0.25;
+    const filter = audioCtx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 800;
     noise.connect(filter); filter.connect(g); g.connect(audioCtx.destination);
     noise.start();
   } catch(e){}
 }
 
-// --- Estado ---
+// --- Game State ---
 const STATE = { MENU:'menu', PLAYING:'playing', GAMEOVER:'gameover', PAUSED:'paused' };
 let state = STATE.MENU;
 let bestScore = safeGetBest();
 
 const game = {
-  time:0, speed:4, maxSpeed:14, score:0, distance:0,
+  time:0, speed:0.4, maxSpeed:1.6, score:0, distance:0,
   boost:0, boostActive:false, shake:0,
   spawnTimer:0, gateTimer:0, starTimer:0, difficultyTimer:0,
 };
@@ -235,7 +253,6 @@ window.addEventListener('keydown', e=>{
   if(e.code === 'ArrowLeft' || e.code === 'KeyA') input.left = true;
   if(e.code === 'ArrowRight' || e.code === 'KeyD') input.right = true;
   if(e.code === 'Space'){ input.boost = true; e.preventDefault(); }
-  if(e.code === 'KeyP'){ togglePause(); }
 });
 window.addEventListener('keyup', e=>{
   if(e.code === 'ArrowLeft' || e.code === 'KeyA') input.left = false;
@@ -243,575 +260,517 @@ window.addEventListener('keyup', e=>{
   if(e.code === 'Space') input.boost = false;
 });
 canvas.addEventListener('mousemove', e=>{
-  if(state === STATE.PLAYING) input.mouseTarget = e.clientX;
+  if(state === STATE.PLAYING) input.mouseTarget = (e.clientX / window.innerWidth) * 2 - 1;
 });
 canvas.addEventListener('touchstart', e=>{
-  if(state === STATE.PLAYING && e.touches[0]) input.mouseTarget = e.touches[0].clientX;
+  if(state === STATE.PLAYING && e.touches[0]) input.mouseTarget = (e.touches[0].clientX / window.innerWidth) * 2 - 1;
 }, {passive:true});
 canvas.addEventListener('touchmove', e=>{
-  if(state === STATE.PLAYING && e.touches[0]) input.mouseTarget = e.touches[0].clientX;
+  if(state === STATE.PLAYING && e.touches[0]) input.mouseTarget = (e.touches[0].clientX / window.innerWidth) * 2 - 1;
 }, {passive:true});
 
-// --- Player ---
-const player = { x:0, y:0, vx:0, w:22, h:44, tilt:0, alive:true, invuln:0, trailTimer:0 };
-function resetPlayer(){
-  player.x = W/2;
-  player.y = H * 0.72;
-  player.vx = 0; player.tilt = 0; player.alive = true; player.invuln = 0;
-}
+// --- Materials ---
+const matSnow = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.0 });
+const matTreeDark = new THREE.MeshStandardMaterial({ color: 0x1a3a26, roughness: 0.8 });
+const matTreeLight = new THREE.MeshStandardMaterial({ color: 0x23502f, roughness: 0.8 });
+const matTrunk = new THREE.MeshStandardMaterial({ color: 0x5a3a20, roughness: 0.9 });
+const matRock = new THREE.MeshStandardMaterial({ color: 0x4a5260, roughness: 0.9 });
+const matStar = new THREE.MeshStandardMaterial({ color: 0xffd23d, emissive: 0xffaa00, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.5 });
+const matGatePole = new THREE.MeshStandardMaterial({ color: 0x3db4ff, emissive: 0x1a6080, emissiveIntensity: 0.4, roughness: 0.6 });
+const matGatePolePassed = new THREE.MeshStandardMaterial({ color: 0x3dff9a, emissive: 0x108040, emissiveIntensity: 0.4, roughness: 0.6 });
+const matGateBanner = new THREE.MeshBasicMaterial({ color: 0x3db4ff, transparent: true, opacity: 0.4 });
 
-// --- Mundo ---
-let obstacles=[], gates=[], stars=[], particles=[], bgSnow=[], trailMarks=[];
+// --- Player (Skier) ---
+const skier = new THREE.Group();
+scene.add(skier);
 
-function initBgSnow(){
-  bgSnow = [];
-  for(let i=0;i<140;i++){
-    bgSnow.push({
-      x:Math.random()*W, y:Math.random()*H,
-      r:Math.random()*2.2+0.6, s:Math.random()*0.8+0.3,
-      drift:(Math.random()-0.5)*0.4, o:Math.random()*0.6+0.3
-    });
+// Body
+const bodyGeo = new THREE.CapsuleGeometry(0.4, 0.8, 4, 8);
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff6b3d, roughness: 0.6 });
+const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+bodyMesh.position.y = 1.0;
+bodyMesh.castShadow = true;
+skier.add(bodyMesh);
+
+// Head
+const headGeo = new THREE.SphereGeometry(0.3, 16, 16);
+const skinMat = new THREE.MeshStandardMaterial({ color: 0xf4c8a0, roughness: 0.7 });
+const headMesh = new THREE.Mesh(headGeo, skinMat);
+headMesh.position.y = 1.8;
+headMesh.castShadow = true;
+skier.add(headMesh);
+
+// Helmet
+const helmetGeo = new THREE.SphereGeometry(0.35, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+const helmetMat = new THREE.MeshStandardMaterial({ color: 0x1a2840, roughness: 0.4 });
+const helmetMesh = new THREE.Mesh(helmetGeo, helmetMat);
+helmetMesh.position.y = 1.85;
+helmetMesh.castShadow = true;
+skier.add(helmetMesh);
+
+// Goggles
+const gogglesGeo = new THREE.BoxGeometry(0.45, 0.12, 0.35);
+const gogglesMat = new THREE.MeshStandardMaterial({ color: 0x3db4ff, emissive: 0x1a6080, emissiveIntensity: 0.3 });
+const gogglesMesh = new THREE.Mesh(gogglesGeo, gogglesMat);
+gogglesMesh.position.set(0, 1.8, 0.25);
+skier.add(gogglesMesh);
+
+// Skis
+const skiGeo = new THREE.BoxGeometry(0.15, 0.05, 1.8);
+const skiMat = new THREE.MeshStandardMaterial({ color: 0xff6b3d, roughness: 0.3, metalness: 0.5 });
+const leftSki = new THREE.Mesh(skiGeo, skiMat);
+leftSki.position.set(-0.25, 0.05, 0);
+leftSki.castShadow = true;
+skier.add(leftSki);
+const rightSki = new THREE.Mesh(skiGeo, skiMat);
+rightSki.position.set(0.25, 0.05, 0);
+rightSki.castShadow = true;
+skier.add(rightSki);
+
+// Poles
+const poleGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.2, 8);
+const poleMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.2 });
+const leftPole = new THREE.Mesh(poleGeo, poleMat);
+leftPole.position.set(-0.5, 0.6, 0.2);
+leftPole.rotation.x = 0.3;
+skier.add(leftPole);
+const rightPole = new THREE.Mesh(poleGeo, poleMat);
+rightPole.position.set(0.5, 0.6, 0.2);
+rightPole.rotation.x = 0.3;
+skier.add(rightPole);
+
+const player = { x:0, vx:0, tilt:0, alive:true, invuln:0 };
+
+// --- World: Ground ---
+const groundGeo = new THREE.PlaneGeometry(60, 400, 1, 1);
+const ground = new THREE.Mesh(groundGeo, matSnow);
+ground.rotation.x = -Math.PI / 2;
+ground.position.z = -150;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// --- World: Background Mountains ---
+function createMountains() {
+  const mtnGroup = new THREE.Group();
+  for(let i=0; i<15; i++) {
+    const h = 15 + Math.random() * 25;
+    const r = 8 + Math.random() * 12;
+    const geo = new THREE.ConeGeometry(r, h, 4 + Math.floor(Math.random()*3));
+    const mat = new THREE.MeshStandardMaterial({ color: 0x4a6a8a, flatShading: true, roughness: 1.0 });
+    const mtn = new THREE.Mesh(geo, mat);
+    const angle = (i / 15) * Math.PI * 2;
+    const dist = 80 + Math.random() * 40;
+    mtn.position.set(Math.cos(angle) * dist, h/2 - 5, Math.sin(angle) * dist - 50);
+    mtn.rotation.y = Math.random() * Math.PI;
+    mtnGroup.add(mtn);
   }
+  scene.add(mtnGroup);
 }
-initBgSnow();
+createMountains();
+
+// --- World: Snow Particles ---
+const snowGeo = new THREE.BufferGeometry();
+const snowCount = 800;
+const snowPositions = new Float32Array(snowCount * 3);
+for(let i=0; i<snowCount; i++) {
+  snowPositions[i*3] = (Math.random() - 0.5) * 60;
+  snowPositions[i*3+1] = Math.random() * 30;
+  snowPositions[i*3+2] = (Math.random() - 0.5) * 100 - 20;
+}
+snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+const snowMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true, opacity: 0.8 });
+const snow = new THREE.Points(snowGeo, snowMat);
+scene.add(snow);
+
+// --- Object Pools ---
+const obstacles = [];
+const gates = [];
+const stars = [];
+const trailParticles = [];
+
+function spawnTree(x, z) {
+  const group = new THREE.Group();
+  
+  const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 1.5, 8);
+  const trunk = new THREE.Mesh(trunkGeo, matTrunk);
+  trunk.position.y = 0.75;
+  trunk.castShadow = true;
+  group.add(trunk);
+  
+  for(let i=0; i<3; i++) {
+    const r = 1.2 - i*0.3;
+    const h = 1.5 - i*0.2;
+    const coneGeo = new THREE.ConeGeometry(r, h, 8);
+    const cone = new THREE.Mesh(coneGeo, i%2===0 ? matTreeDark : matTreeLight);
+    cone.position.y = 1.5 + i*1.0;
+    cone.castShadow = true;
+    group.add(cone);
+  }
+  
+  group.position.set(x, 0, z);
+  scene.add(group);
+  obstacles.push({ mesh: group, type: 'tree', x: x, z: z, radius: 0.8 });
+}
+
+function spawnRock(x, z) {
+  const geo = new THREE.DodecahedronGeometry(0.8 + Math.random()*0.4, 0);
+  const mesh = new THREE.Mesh(geo, matRock);
+  mesh.position.set(x, 0.6, z);
+  mesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  obstacles.push({ mesh: mesh, type: 'rock', x: x, z: z, radius: 0.9 });
+}
+
+function spawnGate(x, z) {
+  const group = new THREE.Group();
+  const poleGeo = new THREE.BoxGeometry(0.2, 2.5, 0.2);
+  
+  const leftPole = new THREE.Mesh(poleGeo, matGatePole);
+  leftPole.position.set(-2, 1.25, 0);
+  leftPole.castShadow = true;
+  group.add(leftPole);
+  
+  const rightPole = new THREE.Mesh(poleGeo, matGatePole);
+  rightPole.position.set(2, 1.25, 0);
+  rightPole.castShadow = true;
+  group.add(rightPole);
+  
+  const bannerGeo = new THREE.PlaneGeometry(4, 0.5);
+  const banner = new THREE.Mesh(bannerGeo, matGateBanner);
+  banner.position.y = 2.3;
+  group.add(banner);
+  
+  group.position.set(x, 0, z);
+  scene.add(group);
+  gates.push({ mesh: group, x: x, z: z, passed: false, leftPole: leftPole, rightPole: rightPole, banner: banner });
+}
+
+function spawnStar(x, z) {
+  const geo = new THREE.OctahedronGeometry(0.5, 0);
+  const mesh = new THREE.Mesh(geo, matStar);
+  mesh.position.set(x, 1.5, z);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  stars.push({ mesh: mesh, x: x, z: z, t: 0 });
+}
+
+function spawnTrailParticle() {
+  const geo = new THREE.SphereGeometry(0.1, 4, 4);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(player.x + (Math.random()-0.5)*0.4, 0.1, 0.5);
+  scene.add(mesh);
+  trailParticles.push({ mesh: mesh, life: 1.0, vy: 0.5 + Math.random()*0.5 });
+}
 
 // --- Spawners ---
-function spawnObstacle(){
-  const type = Math.random() < 0.65 ? 'tree' : 'rock';
-  const size = type === 'tree' ? 28 + Math.random()*16 : 22 + Math.random()*14;
-  obstacles.push({ x:Math.random()*(W-80)+40, y:-80, type, size, rot:Math.random()*Math.PI*2, seed:Math.random() });
-}
-function spawnGate(){
-  const gap = 140 + Math.random()*60;
-  const cx = 80 + Math.random()*(W-160);
-  gates.push({ x1:cx-gap/2, x2:cx+gap/2, y:-40, passed:false, h:60 });
-}
-function spawnStar(){
-  stars.push({ x:60+Math.random()*(W-120), y:-40, r:12, t:0 });
+function spawnObstaclePair() {
+  const type = Math.random() < 0.6 ? 'tree' : 'rock';
+  const x = (Math.random() - 0.5) * 16;
+  if(type === 'tree') spawnTree(x, -80); else spawnRock(x, -80);
 }
 
-// --- Partículas ---
-function spawnTrailParticle(){
-  for(let i=0;i<2;i++){
-    particles.push({
-      x:player.x+(Math.random()-0.5)*16, y:player.y+18+Math.random()*6,
-      vx:-player.vx*0.2+(Math.random()-0.5)*0.6, vy:1+Math.random()*1.2,
-      life:1, decay:0.025+Math.random()*0.02, r:2+Math.random()*2.5, color:'#eaf6ff'
-    });
-  }
+function spawnGatePair() {
+  const x = (Math.random() - 0.5) * 10;
+  spawnGate(x, -80);
 }
-function spawnCrashParticles(x,y){
-  for(let i=0;i<60;i++){
-    const ang=Math.random()*Math.PI*2, sp=Math.random()*6+2;
-    particles.push({
-      x, y, vx:Math.cos(ang)*sp, vy:Math.sin(ang)*sp-2,
-      life:1, decay:0.018+Math.random()*0.015, r:2+Math.random()*4,
-      color:Math.random()<0.5?'#ff6b3d':'#eaf6ff', gravity:0.25
-    });
-  }
+
+function spawnStarSingle() {
+  const x = (Math.random() - 0.5) * 14;
+  spawnStar(x, -80);
 }
-function spawnBoostParticles(){
-  particles.push({
-    x:player.x+(Math.random()-0.5)*10, y:player.y+16,
-    vx:(Math.random()-0.5)*1.5, vy:2+Math.random()*2,
-    life:1, decay:0.04, r:3+Math.random()*3, color:'#ffd23d'
-  });
+
+// --- Reset ---
+function resetGame() {
+  // Clear obstacles
+  for(const o of obstacles) scene.remove(o.mesh);
+  obstacles.length = 0;
+  for(const g of gates) scene.remove(g.mesh);
+  gates.length = 0;
+  for(const s of stars) scene.remove(s.mesh);
+  stars.length = 0;
+  for(const p of trailParticles) scene.remove(p.mesh);
+  trailParticles.length = 0;
+  
+  player.x = 0; player.vx = 0; player.tilt = 0; player.alive = true; player.invuln = 0;
+  skier.position.x = 0;
+  skier.rotation.z = 0;
+  
+  game.time = 0; game.speed = 0.4; game.score = 0; game.distance = 0;
+  game.boost = 0; game.boostActive = false; game.shake = 0;
+  game.spawnTimer = 0; game.gateTimer = 1.5; game.starTimer = 2; game.difficultyTimer = 0;
 }
 
 // --- Update ---
-function update(dt){
+function update(dt) {
   game.time += dt;
   game.difficultyTimer += dt;
-  if(game.difficultyTimer > 1.5){
+  
+  if(game.difficultyTimer > 1.5) {
     game.difficultyTimer = 0;
-    if(game.speed < game.maxSpeed) game.speed += 0.18;
+    if(game.speed < game.maxSpeed) game.speed += 0.02;
   }
-
+  
   let currentSpeed = game.speed;
-  if(game.boostActive) currentSpeed *= 1.7;
-
-  game.distance += currentSpeed * 0.06;
-  game.score += currentSpeed * 0.04;
-
-  const accel = 0.6, maxVx = 7.5;
+  if(game.boostActive) currentSpeed *= 2.2;
+  
+  game.distance += currentSpeed;
+  game.score += currentSpeed * 0.5;
+  
+  // Movement
+  const accel = 0.02;
+  const maxVx = 0.35;
+  
   if(input.left) player.vx -= accel;
   else if(input.right) player.vx += accel;
-  else if(input.mouseTarget !== null){
-    const diff = input.mouseTarget - player.x;
-    player.vx += Math.sign(diff) * Math.min(Math.abs(diff)*0.06, accel);
+  else if(input.mouseTarget !== null) {
+    const diff = input.mouseTarget * 8 - player.x;
+    player.vx += Math.sign(diff) * Math.min(Math.abs(diff)*0.005, accel);
   } else {
-    player.vx *= 0.88;
+    player.vx *= 0.9;
   }
+  
   player.vx = Math.max(-maxVx, Math.min(maxVx, player.vx));
   player.x += player.vx;
-
-  const margin = 18;
-  if(player.x < margin){ player.x = margin; player.vx = 0; }
-  if(player.x > W - margin){ player.x = W - margin; player.vx = 0; }
-
-  player.tilt += (player.vx * 0.04 - player.tilt) * 0.18;
+  
+  if(player.x < -8) { player.x = -8; player.vx = 0; }
+  if(player.x > 8) { player.x = 8; player.vx = 0; }
+  
+  // Visuals
+  skier.position.x = player.x;
+  player.tilt += (player.vx * 2 - player.tilt) * 0.15;
+  skier.rotation.z = -player.tilt * 0.5;
+  skier.rotation.y = player.tilt * 0.8;
+  
   if(player.invuln > 0) player.invuln -= dt;
-
-  if(input.boost && game.boost > 5 && !game.boostActive){
+  
+  // Boost
+  if(input.boost && game.boost > 5 && !game.boostActive) {
     game.boostActive = true;
     whoosh(true);
   }
-  if(game.boostActive){
-    game.boost -= 60 * dt;
-    spawnBoostParticles();
-    if(game.boost <= 0){ game.boost = 0; game.boostActive = false; whoosh(false); }
+  if(game.boostActive) {
+    game.boost -= 30 * dt;
+    if(Math.random() < 0.5) spawnTrailParticle();
+    if(game.boost <= 0) { game.boost = 0; game.boostActive = false; whoosh(false); }
   }
-
-  player.trailTimer += dt;
-  if(player.trailTimer > 0.02){
-    player.trailTimer = 0;
-    spawnTrailParticle();
-    trailMarks.push({ x:player.x-5, y:player.y+22, life:1 });
-    trailMarks.push({ x:player.x+5, y:player.y+22, life:1 });
-  }
-  for(let i=trailMarks.length-1;i>=0;i--){
-    trailMarks[i].y += currentSpeed;
-    trailMarks[i].life -= 0.004;
-    if(trailMarks[i].life <= 0 || trailMarks[i].y > H+20) trailMarks.splice(i,1);
-  }
-
+  
+  // Spawn Timing
   game.spawnTimer += dt;
-  const spawnInterval = Math.max(0.32, 0.9 - game.speed*0.04);
-  if(game.spawnTimer > spawnInterval){ game.spawnTimer = 0; spawnObstacle(); }
+  const spawnInterval = Math.max(0.4, 1.2 - game.speed*0.3);
+  if(game.spawnTimer > spawnInterval) {
+    game.spawnTimer = 0;
+    spawnObstaclePair();
+  }
+  
   game.gateTimer += dt;
-  if(game.gateTimer > 2.4){ game.gateTimer = 0; if(Math.random()<0.85) spawnGate(); }
+  if(game.gateTimer > 2.5) {
+    game.gateTimer = 0;
+    if(Math.random() < 0.8) spawnGatePair();
+  }
+  
   game.starTimer += dt;
-  if(game.starTimer > 3.5){ game.starTimer = 0; if(Math.random()<0.7) spawnStar(); }
-
-  for(let i=obstacles.length-1;i>=0;i--){
+  if(game.starTimer > 3.5) {
+    game.starTimer = 0;
+    if(Math.random() < 0.7) spawnStarSingle();
+  }
+  
+  // Move Obstacles
+  for(let i=obstacles.length-1; i>=0; i--) {
     const o = obstacles[i];
-    o.y += currentSpeed;
-    if(o.y > H+80){ obstacles.splice(i,1); continue; }
-    if(player.invuln <= 0 && checkCollisionObstacle(o)){
-      hitObstacle();
-      obstacles.splice(i,1);
+    o.z += currentSpeed;
+    o.mesh.position.z = o.z;
+    
+    // Collision check (only when close)
+    if(o.z > -2 && o.z < 2 && player.invuln <= 0) {
+      const dx = Math.abs(o.x - player.x);
+      if(dx < o.radius + 0.4) {
+        hitObstacle();
+      }
+    }
+    
+    if(o.z > 15) {
+      scene.remove(o.mesh);
+      obstacles.splice(i, 1);
     }
   }
-  for(let i=gates.length-1;i>=0;i--){
+  
+  // Move Gates
+  for(let i=gates.length-1; i>=0; i--) {
     const g = gates[i];
-    g.y += currentSpeed;
-    if(!g.passed && g.y > player.y + 10){
+    g.z += currentSpeed;
+    g.mesh.position.z = g.z;
+    
+    if(!g.passed && g.z > 0.5) {
       g.passed = true;
-      if(player.x > g.x1+6 && player.x < g.x2-6){
+      const dx = Math.abs(g.x - player.x);
+      if(dx < 1.8) {
+        // Passed through gate
         game.score += 50;
         showToast('+50', '#3dff9a');
         beep(880, 0.1, 'triangle', 0.18);
         beep(1200, 0.08, 'triangle', 0.14);
-      } else {
-        if(player.invuln <= 0 && (player.x < g.x1+6 || player.x > g.x2-6)) hitObstacle();
+        g.leftPole.material = matGatePolePassed;
+        g.rightPole.material = matGatePolePassed;
+        g.banner.material.color.setHex(0x3dff9a);
+      } else if(dx < 2.5 && player.invuln <= 0) {
+        // Hit gate pole
+        hitObstacle();
       }
     }
-    if(g.y > H+80) gates.splice(i,1);
-  }
-  for(let i=stars.length-1;i>=0;i--){
-    const s = stars[i];
-    s.y += currentSpeed;
-    s.t += dt;
-    const dx=s.x-player.x, dy=s.y-player.y;
-    if(dx*dx+dy*dy < (s.r+16)*(s.r+16)){
-      stars.splice(i,1);
-      game.score += 25;
-      game.boost = Math.min(100, game.boost+18);
-      showToast('+25', '#ffd23d');
-      beep(1200, 0.08, 'square', 0.12);
-      beep(1600, 0.08, 'square', 0.1);
-      continue;
+    
+    if(g.z > 15) {
+      scene.remove(g.mesh);
+      gates.splice(i, 1);
     }
-    if(s.y > H+40) stars.splice(i,1);
   }
-
-  for(let i=particles.length-1;i>=0;i--){
-    const p = particles[i];
-    p.x += p.vx; p.y += p.vy;
-    if(p.gravity) p.vy += p.gravity;
-    p.life -= p.decay;
-    if(p.life <= 0) particles.splice(i,1);
+  
+  // Move Stars
+  for(let i=stars.length-1; i>=0; i--) {
+    const s = stars[i];
+    s.z += currentSpeed;
+    s.t += dt;
+    s.mesh.position.z = s.z;
+    s.mesh.position.y = 1.5 + Math.sin(s.t * 4) * 0.3;
+    s.mesh.rotation.y += dt * 3;
+    s.mesh.rotation.x += dt * 2;
+    
+    if(s.z > -1 && s.z < 1) {
+      const dx = Math.abs(s.x - player.x);
+      const dy = Math.abs(s.mesh.position.y - 1.0);
+      if(dx < 0.8 && dy < 1.2) {
+        // Collected star
+        scene.remove(s.mesh);
+        stars.splice(i, 1);
+        game.score += 25;
+        game.boost = Math.min(100, game.boost + 20);
+        showToast('+25', '#ffd23d');
+        beep(1200, 0.08, 'square', 0.12);
+        beep(1600, 0.08, 'square', 0.1);
+        continue;
+      }
+    }
+    
+    if(s.z > 15) {
+      scene.remove(s.mesh);
+      stars.splice(i, 1);
+    }
   }
-
-  for(const f of bgSnow){
-    f.y += f.s + currentSpeed*0.15;
-    f.x += f.drift;
-    if(f.y > H){ f.y = -5; f.x = Math.random()*W; }
+  
+  // Move Trail Particles
+  for(let i=trailParticles.length-1; i>=0; i--) {
+    const p = trailParticles[i];
+    p.mesh.position.z += currentSpeed * 0.5;
+    p.mesh.position.y += p.vy * dt;
+    p.life -= dt * 2;
+    p.mesh.material.opacity = p.life;
+    if(p.life <= 0) {
+      scene.remove(p.mesh);
+      trailParticles.splice(i, 1);
+    }
   }
-
-  if(game.shake > 0) game.shake = Math.max(0, game.shake - dt*8);
-
-  // HUD
-  const sv = document.getElementById('scoreVal');
-  if(sv) sv.textContent = Math.floor(game.score);
-  const dv = document.getElementById('distVal');
-  if(dv) dv.textContent = Math.floor(game.distance) + 'm';
-  const spv = document.getElementById('speedVal');
-  if(spv) spv.textContent = Math.floor(currentSpeed*10);
-  const bf = document.getElementById('boostFill');
-  if(bf) bf.style.width = game.boost + '%';
-  const bt = document.getElementById('boostTxt');
-  if(bt) bt.textContent = Math.floor(game.boost) + '%';
+  
+  // Scroll Ground Texture (simulated by moving ground and resetting)
+  ground.position.z += currentSpeed;
+  if(ground.position.z > 50) {
+    ground.position.z -= 100;
+  }
+  
+  // Snow particles
+  const positions = snow.geometry.attributes.position.array;
+  for(let i=0; i<snowCount; i++) {
+    positions[i*3+2] += currentSpeed * 0.8;
+    positions[i*3+1] -= 0.5 + Math.random()*0.2;
+    positions[i*3] += Math.sin(game.time + i) * 0.01;
+    
+    if(positions[i*3+2] > 20) {
+      positions[i*3+2] = -80 - Math.random()*20;
+      positions[i*3+1] = 10 + Math.random()*20;
+      positions[i*3] = (Math.random() - 0.5) * 60;
+    }
+    if(positions[i*3+1] < 0) {
+      positions[i*3+1] = 10 + Math.random()*20;
+    }
+  }
+  snow.geometry.attributes.position.needsUpdate = true;
+  
+  // Camera Shake
+  if(game.shake > 0) {
+    camera.position.x = player.x * 0.5 + (Math.random()-0.5) * game.shake * 2;
+    camera.position.y = 6 + (Math.random()-0.5) * game.shake * 1;
+    game.shake = Math.max(0, game.shake - dt*4);
+  } else {
+    camera.position.x += (player.x * 0.5 - camera.position.x) * 0.1;
+    camera.position.y += (6 - camera.position.y) * 0.1;
+  }
+  
+  // Camera FOV for boost
+  const targetFov = game.boostActive ? 80 : 70;
+  camera.fov += (targetFov - camera.fov) * 0.1;
+  camera.updateProjectionMatrix();
+  
+  // Update HUD
+  document.getElementById('scoreVal').textContent = Math.floor(game.score);
+  document.getElementById('distVal').textContent = Math.floor(game.distance) + 'm';
+  document.getElementById('speedVal').textContent = Math.floor(currentSpeed * 100);
+  document.getElementById('boostFill').style.width = game.boost + '%';
+  document.getElementById('boostTxt').textContent = Math.floor(game.boost) + '%';
 }
 
-function checkCollisionObstacle(o){
-  const dx = Math.abs(o.x - player.x);
-  const dy = Math.abs(o.y - (player.y + 8));
-  const r = o.size * 0.42;
-  return dx < r + 8 && dy < r + 18;
-}
-
-function hitObstacle(){
+function hitObstacle() {
   if(!player.alive) return;
   crashSound();
-  spawnCrashParticles(player.x, player.y);
-  game.shake = 1.2;
+  game.shake = 1.5;
   endGame();
 }
 
-// --- Render ---
-function render(){
-  const sx = (Math.random()-0.5) * game.shake * 14;
-  const sy = (Math.random()-0.5) * game.shake * 14;
-  ctx.save();
-  ctx.translate(sx, sy);
-  drawBackground();
-  drawTrailMarks();
-  drawGates();
-  drawObstacles();
-  drawStars();
-  drawPlayer();
-  drawParticles();
-  drawBgSnow();
-  drawVignette();
-  drawSpeedLines();
-  ctx.restore();
+// --- Game Flow ---
+function startGame() {
+  initAudio();
+  resetGame();
+  state = STATE.PLAYING;
+  
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('gameover').classList.add('hidden');
+  document.getElementById('hud').style.display = 'flex';
+  document.getElementById('boostWrap').style.display = 'block';
+  
+  const hint = document.getElementById('hint');
+  hint.style.display = 'block';
+  setTimeout(function(){ hint.style.display = 'none'; }, 4000);
 }
 
-function drawBackground(){
-  const g = ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0, '#0a1a2e');
-  g.addColorStop(0.4, '#1a3258');
-  g.addColorStop(0.7, '#3a6a9a');
-  g.addColorStop(1, '#cfe6f5');
-  ctx.fillStyle = g;
-  ctx.fillRect(0,0,W,H);
-
-  const off = (game.time * 8) % 200;
-  drawMountains(H*0.32, '#1c3556', 0.4, off*0.3);
-  drawMountains(H*0.42, '#2a4a72', 0.6, off*0.6);
-  drawMountains(H*0.55, '#3a6090', 0.85, off*1.0);
-
-  const trackG = ctx.createLinearGradient(0, H*0.5, 0, H);
-  trackG.addColorStop(0, 'rgba(242,250,255,0.0)');
-  trackG.addColorStop(0.3, 'rgba(242,250,255,0.85)');
-  trackG.addColorStop(1, '#ffffff');
-  ctx.fillStyle = trackG;
-  ctx.beginPath();
-  ctx.moveTo(W*0.15, H*0.5);
-  ctx.lineTo(W*0.85, H*0.5);
-  ctx.lineTo(W*1.1, H);
-  ctx.lineTo(W*-0.1, H);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(120,160,200,0.25)';
-  ctx.beginPath();
-  ctx.moveTo(0, H*0.5); ctx.lineTo(W*0.15, H*0.5);
-  ctx.lineTo(W*-0.1, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(W, H*0.5); ctx.lineTo(W*0.85, H*0.5);
-  ctx.lineTo(W*1.1, H); ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
-}
-
-function drawMountains(baseY, color, alpha, offset){
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(-50, baseY+60);
-  const step = 80;
-  let x = -50;
-  while(x < W+100){
-    const peakH = 60 + Math.sin((x+offset)*0.013)*40 + Math.sin((x+offset)*0.05)*20;
-    ctx.lineTo(x, baseY - peakH);
-    x += step;
+function endGame() {
+  state = STATE.GAMEOVER;
+  player.alive = false;
+  
+  const finalScore = Math.floor(game.score);
+  const finalDist = Math.floor(game.distance);
+  document.getElementById('finalScore').textContent = finalScore;
+  document.getElementById('finalDist').textContent = finalDist + 'm';
+  
+  const isRecord = finalScore > bestScore;
+  if(isRecord) {
+    bestScore = finalScore;
+    safeSetBest(bestScore);
+    document.getElementById('recordTag').style.display = 'inline-block';
+  } else {
+    document.getElementById('recordTag').style.display = 'none';
   }
-  ctx.lineTo(W+50, baseY+60);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.beginPath();
-  ctx.moveTo(-50, baseY+60);
-  x = -50;
-  while(x < W+100){
-    const peakH = 60 + Math.sin((x+offset)*0.013)*40 + Math.sin((x+offset)*0.05)*20;
-    ctx.lineTo(x, baseY - peakH);
-    ctx.lineTo(x + step*0.3, baseY - peakH + 14);
-    ctx.lineTo(x + step*0.5, baseY - peakH + 6);
-    x += step;
-  }
-  ctx.lineTo(W+50, baseY+60);
-  ctx.closePath();
-  ctx.fill();
-  ctx.globalAlpha = 1;
-}
-
-function drawTrailMarks(){
-  ctx.strokeStyle = 'rgba(140,180,210,0.5)';
-  ctx.lineWidth = 1.5;
-  for(const m of trailMarks){
-    ctx.globalAlpha = m.life * 0.7;
-    ctx.beginPath();
-    ctx.arc(m.x, m.y, 2, 0, Math.PI*2);
-    ctx.fillStyle = '#9ec4dd';
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawGates(){
-  for(const g of gates){
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-    ctx.beginPath();
-    ctx.ellipse((g.x1+g.x2)/2, g.y+g.h+4, (g.x2-g.x1)/2, 6, 0, 0, Math.PI*2);
-    ctx.fill();
-    ctx.fillStyle = g.passed ? 'rgba(61,255,154,0.25)' : 'rgba(61,180,255,0.35)';
-    ctx.fillRect(g.x1, g.y, g.x2-g.x1, 6);
-    drawGatePole(g.x1, g.y, g.h, g.passed);
-    drawGatePole(g.x2, g.y, g.h, g.passed);
-  }
-}
-function drawGatePole(x, y, h, passed){
-  const color = passed ? '#3dff9a' : '#3db4ff';
-  ctx.fillStyle = color;
-  ctx.fillRect(x-3, y, 6, h);
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(x, y+h, 5, 2, 0, 0, Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.fillRect(x-2, y, 1.5, h);
-}
-
-function drawObstacles(){
-  obstacles.sort((a,b)=> a.y - b.y);
-  for(const o of obstacles){
-    if(o.type === 'tree') drawTree(o);
-    else drawRock(o);
-  }
-}
-function drawTree(o){
-  const x=o.x, y=o.y;
-  ctx.fillStyle = 'rgba(40,80,110,0.35)';
-  ctx.beginPath();
-  ctx.ellipse(x, y+o.size*0.4, o.size*0.7, o.size*0.2, 0, 0, Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle = '#5a3a20';
-  ctx.fillRect(x-3, y-o.size*0.1, 6, o.size*0.4);
-  for(let i=0;i<3;i++){
-    const ly = y - i*o.size*0.32;
-    const lw = o.size * (0.9 - i*0.18);
-    ctx.fillStyle = i%2===0 ? '#1a3a26' : '#23502f';
-    ctx.beginPath();
-    ctx.moveTo(x, ly - o.size*0.6);
-    ctx.lineTo(x - lw*0.5, ly);
-    ctx.lineTo(x + lw*0.5, ly);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#f2faff';
-    ctx.beginPath();
-    ctx.moveTo(x, ly - o.size*0.6);
-    ctx.lineTo(x - lw*0.22, ly - o.size*0.32);
-    ctx.lineTo(x + lw*0.22, ly - o.size*0.32);
-    ctx.closePath();
-    ctx.fill();
-  }
-}
-function drawRock(o){
-  const x=o.x, y=o.y, s=o.size;
-  ctx.fillStyle = 'rgba(40,80,110,0.35)';
-  ctx.beginPath();
-  ctx.ellipse(x, y+s*0.3, s*0.7, s*0.18, 0, 0, Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle = '#4a5260';
-  ctx.beginPath();
-  ctx.moveTo(x-s*0.5, y+s*0.3);
-  ctx.lineTo(x-s*0.3, y-s*0.2);
-  ctx.lineTo(x, y-s*0.4);
-  ctx.lineTo(x+s*0.35, y-s*0.15);
-  ctx.lineTo(x+s*0.5, y+s*0.3);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = '#f2faff';
-  ctx.beginPath();
-  ctx.moveTo(x-s*0.2, y-s*0.18);
-  ctx.lineTo(x, y-s*0.4);
-  ctx.lineTo(x+s*0.25, y-s*0.1);
-  ctx.lineTo(x+s*0.1, y-s*0.05);
-  ctx.lineTo(x-s*0.05, y-s*0.1);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.beginPath();
-  ctx.moveTo(x, y-s*0.4);
-  ctx.lineTo(x+s*0.35, y-s*0.15);
-  ctx.lineTo(x+s*0.5, y+s*0.3);
-  ctx.lineTo(x+s*0.15, y+s*0.3);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawStars(){
-  for(const s of stars){
-    const pulse = 1 + Math.sin(s.t*6) * 0.12;
-    ctx.save();
-    ctx.translate(s.x, s.y);
-    ctx.rotate(s.t * 2);
-    const glow = ctx.createRadialGradient(0,0,0,0,0,s.r*2.4);
-    glow.addColorStop(0, 'rgba(255,210,61,0.7)');
-    glow.addColorStop(1, 'rgba(255,210,61,0)');
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(0,0,s.r*2.4,0,Math.PI*2);
-    ctx.fill();
-    ctx.fillStyle = '#ffd23d';
-    ctx.beginPath();
-    for(let i=0;i<10;i++){
-      const a = (i/10)*Math.PI*2 - Math.PI/2;
-      const rr = i%2===0 ? s.r*pulse : s.r*0.45*pulse;
-      const px = Math.cos(a)*rr, py = Math.sin(a)*rr;
-      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#fff8d6';
-    ctx.beginPath();
-    ctx.arc(-s.r*0.2, -s.r*0.2, s.r*0.3, 0, Math.PI*2);
-    ctx.fill();
-    ctx.restore();
-  }
-}
-
-function drawPlayer(){
-  if(!player.alive) return;
-  const blink = player.invuln > 0 && Math.floor(player.invuln*20) % 2 === 0;
-  if(blink) return;
-
-  ctx.save();
-  ctx.translate(player.x, player.y);
-  ctx.rotate(player.tilt * 0.6);
-
-  ctx.fillStyle = 'rgba(40,80,110,0.4)';
-  ctx.beginPath();
-  ctx.ellipse(0, 26, 16, 5, 0, 0, Math.PI*2);
-  ctx.fill();
-
-  ctx.fillStyle = '#ff6b3d';
-  ctx.fillRect(-12, 14, 4, 30);
-  ctx.fillRect(8, 14, 4, 30);
-  ctx.fillStyle = '#222';
-  ctx.fillRect(-12, 42, 4, 2);
-  ctx.fillRect(8, 42, 4, 2);
-
-  ctx.fillStyle = '#1a2840';
-  ctx.fillRect(-7, 0, 5, 18);
-  ctx.fillRect(2, 0, 5, 18);
-
-  ctx.fillStyle = '#ff6b3d';
-  ctx.beginPath();
-  ctx.moveTo(-10, -6); ctx.lineTo(10, -6);
-  ctx.lineTo(8, 6); ctx.lineTo(-8, 6);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = '#e0502a';
-  ctx.fillRect(-1, -6, 2, 12);
-
-  ctx.fillStyle = '#ff6b3d';
-  ctx.fillRect(-13, -4, 4, 12);
-  ctx.fillRect(9, -4, 4, 12);
-  ctx.strokeStyle = '#cfd8e0';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(-11, 8); ctx.lineTo(-14, 22);
-  ctx.moveTo(11, 8); ctx.lineTo(14, 22);
-  ctx.stroke();
-
-  ctx.fillStyle = '#f4c8a0';
-  ctx.beginPath();
-  ctx.arc(0, -12, 7, 0, Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle = '#1a2840';
-  ctx.beginPath();
-  ctx.arc(0, -13, 8, Math.PI, 0);
-  ctx.fill();
-  ctx.fillRect(-8, -13, 16, 2);
-  ctx.fillStyle = '#3db4ff';
-  ctx.fillRect(-6, -11, 12, 3);
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  ctx.fillRect(-5, -11, 3, 1);
-
-  if(game.boostActive){
-    ctx.globalAlpha = 0.6;
-    const g = ctx.createRadialGradient(0,0,0,0,0,40);
-    g.addColorStop(0, 'rgba(255,210,61,0.5)');
-    g.addColorStop(1, 'rgba(255,210,61,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(0, 5, 40, 0, Math.PI*2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-  ctx.restore();
-}
-
-function drawParticles(){
-  for(const p of particles){
-    ctx.globalAlpha = Math.max(0, p.life);
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI*2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawBgSnow(){
-  for(const f of bgSnow){
-    ctx.globalAlpha = f.o;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawVignette(){
-  const g = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
-  g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, 'rgba(6,18,31,0.55)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0,0,W,H);
-}
-
-function drawSpeedLines(){
-  if(game.speed < 7 && !game.boostActive) return;
-  const intensity = game.boostActive ? 1 : Math.min(1, (game.speed-7)/5);
-  ctx.strokeStyle = 'rgba(255,255,255,' + (0.15 * intensity) + ')';
-  ctx.lineWidth = 1;
-  for(let i=0;i<12;i++){
-    const x = Math.random()*W, y = Math.random()*H, len = 20+Math.random()*40;
-    ctx.beginPath();
-    ctx.moveTo(x, y); ctx.lineTo(x, y+len);
-    ctx.stroke();
-  }
+  document.getElementById('bestScore').textContent = bestScore;
+  
+  setTimeout(function(){
+    document.getElementById('gameover').classList.remove('hidden');
+    document.getElementById('hud').style.display = 'none';
+    document.getElementById('boostWrap').style.display = 'none';
+  }, 1000);
 }
 
 // --- Toast ---
 const toastEl = document.getElementById('toast');
 let toastTimer = null;
-function showToast(text, color){
-  if(!toastEl) return;
+function showToast(text, color) {
   toastEl.textContent = text;
   toastEl.style.color = color || '#ffd23d';
   toastEl.style.textShadow = '0 4px 20px ' + (color || '#ffd23d') + '99';
@@ -820,87 +779,45 @@ function showToast(text, color){
   toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 700);
 }
 
-// --- Game flow ---
-function startGame(){
-  initAudio();
-  state = STATE.PLAYING;
-  game.time=0; game.speed=4; game.score=0; game.distance=0;
-  game.boost=0; game.boostActive=false; game.shake=0;
-  game.spawnTimer=0; game.gateTimer=1.5; game.starTimer=2; game.difficultyTimer=0;
-  obstacles=[]; gates=[]; stars=[]; particles=[]; trailMarks=[];
-  input.mouseTarget = null;
-  resetPlayer();
+// --- Resize ---
+window.addEventListener('resize', function() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-  const menu = document.getElementById('menu');
-  const gameover = document.getElementById('gameover');
-  const hud = document.getElementById('hud');
-  const boostWrap = document.getElementById('boostWrap');
-  const hint = document.getElementById('hint');
-  if(menu) menu.classList.add('hidden');
-  if(gameover) gameover.classList.add('hidden');
-  if(hud) hud.style.display = 'flex';
-  if(boostWrap) boostWrap.style.display = 'block';
-  if(hint){ hint.style.display = 'block'; setTimeout(function(){ hint.style.display='none'; }, 4000); }
-}
-
-function endGame(){
-  state = STATE.GAMEOVER;
-  player.alive = false;
-  const finalScore = Math.floor(game.score);
-  const finalDist = Math.floor(game.distance);
-  const fsEl = document.getElementById('finalScore');
-  const fdEl = document.getElementById('finalDist');
-  if(fsEl) fsEl.textContent = finalScore;
-  if(fdEl) fdEl.textContent = finalDist + 'm';
-
-  const isRecord = finalScore > bestScore;
-  if(isRecord){
-    bestScore = finalScore;
-    safeSetBest(bestScore);
-    const rt = document.getElementById('recordTag');
-    if(rt) rt.style.display = 'inline-block';
-  } else {
-    const rt = document.getElementById('recordTag');
-    if(rt) rt.style.display = 'none';
-  }
-  const bsEl = document.getElementById('bestScore');
-  if(bsEl) bsEl.textContent = bestScore;
-
-  setTimeout(function(){
-    const go = document.getElementById('gameover');
-    const hud = document.getElementById('hud');
-    const bw = document.getElementById('boostWrap');
-    if(go) go.classList.remove('hidden');
-    if(hud) hud.style.display = 'none';
-    if(bw) bw.style.display = 'none';
-  }, 800);
-}
-
-function togglePause(){
-  if(state === STATE.PLAYING) state = STATE.PAUSED;
-  else if(state === STATE.PAUSED) state = STATE.PLAYING;
-}
-
-// --- Loop ---
-let lastTime = Date.now();
-function loop(){
-  const now = Date.now();
-  const dt = Math.min(0.05, (now - lastTime)/1000);
+// --- Animation Loop ---
+let lastTime = performance.now();
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
-  if(state === STATE.PLAYING) update(dt);
-  render();
-  requestAnimationFrame(loop);
+  
+  if(state === STATE.PLAYING) {
+    update(dt);
+  } else {
+    // Idle camera rotation for menu
+    if(state === STATE.MENU) {
+      camera.position.x = Math.sin(now * 0.0002) * 3;
+      camera.lookAt(0, 1, 0);
+      skier.rotation.y = Math.sin(now * 0.0005) * 0.3;
+    }
+  }
+  
+  renderer.render(scene, camera);
 }
 
-// --- Inicialização ---
-resetPlayer();
-requestAnimationFrame(loop);
+// Initial setup
+skier.position.set(0, 0, 0);
+camera.position.set(0, 6, 12);
+camera.lookAt(0, 1, 0);
+animate();
 
-// --- Botões (depois de tudo pronto) ---
-var startBtn = document.getElementById('startBtn');
-var restartBtn = document.getElementById('restartBtn');
-if(startBtn) startBtn.addEventListener('click', startGame);
-if(restartBtn) restartBtn.addEventListener('click', startGame);
+// Buttons
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+
 </script>
 </body>
 </html>
