@@ -1,0 +1,49 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function validPlayer(data, playerId) {
+      return data.keys().hasOnly(['uid', 'name', 'bestDistance', 'bestScore', 'playing', 'x', 'distance', 'updatedAt'])
+        && data.keys().hasAll(['uid', 'name', 'bestDistance', 'bestScore', 'playing', 'x', 'distance', 'updatedAt'])
+        && data.uid == playerId
+        && playerId.matches('^[a-f0-9]{32}$')
+        && data.name is string
+        && data.name.size() >= 1
+        && data.name.size() <= 20
+        && data.bestDistance is int
+        && data.bestDistance >= 0
+        && data.bestDistance <= 1000000
+        && data.bestScore is int
+        && data.bestScore >= 0
+        && data.bestScore <= 1000000
+        && data.playing is bool
+        && data.x is number
+        && data.x >= -8
+        && data.x <= 8
+        && data.distance is int
+        && data.distance >= 0
+        && data.distance <= 1000000
+        && data.updatedAt == request.time;
+    }
+
+    match /rooms/{roomId} {
+      allow get: if roomId.matches('^[A-Z0-9]{6}$');
+      allow list: if false;
+      allow create: if roomId.matches('^[A-Z0-9]{6}$')
+        && request.resource.data.keys().hasOnly(['hostId', 'createdAt'])
+        && request.resource.data.keys().hasAll(['hostId', 'createdAt'])
+        && request.resource.data.hostId.matches('^[a-f0-9]{32}$')
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+
+      match /players/{playerId} {
+        allow get, list: if true;
+        allow create: if validPlayer(request.resource.data, playerId)
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.hostId is string;
+        allow update: if validPlayer(request.resource.data, playerId)
+          && request.resource.data.bestDistance >= resource.data.bestDistance;
+        allow delete: if false;
+      }
+    }
+  }
+}
