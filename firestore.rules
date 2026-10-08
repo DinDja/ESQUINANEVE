@@ -2,11 +2,24 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function validRoom(data) {
+      return data.keys().hasOnly(['hostId', 'createdAt', 'raceId', 'raceStarted', 'countdownEndsAt'])
+        && data.keys().hasAll(['hostId', 'createdAt', 'raceId', 'raceStarted', 'countdownEndsAt'])
+        && data.hostId.matches('^[a-f0-9]{32}$')
+        && data.createdAt is timestamp
+        && data.raceId is int
+        && data.raceId >= 1
+        && data.raceStarted is bool
+        && (data.countdownEndsAt == null || data.countdownEndsAt is timestamp);
+    }
+
     function validPlayer(data, playerId) {
-      return data.keys().hasOnly(['uid', 'name', 'bestDistance', 'bestScore', 'playing', 'ready', 'x', 'distance', 'laps', 'raceFinished', 'finishedAt', 'updatedAt'])
-        && data.keys().hasAll(['uid', 'name', 'bestDistance', 'bestScore', 'playing', 'ready', 'x', 'distance', 'laps', 'raceFinished', 'finishedAt', 'updatedAt'])
+      return data.keys().hasOnly(['uid', 'raceId', 'name', 'bestDistance', 'bestScore', 'playing', 'ready', 'x', 'distance', 'laps', 'raceFinished', 'finishedAt', 'updatedAt'])
+        && data.keys().hasAll(['uid', 'raceId', 'name', 'bestDistance', 'bestScore', 'playing', 'ready', 'x', 'distance', 'laps', 'raceFinished', 'finishedAt', 'updatedAt'])
         && data.uid == playerId
         && playerId.matches('^[a-f0-9]{32}$')
+        && data.raceId is int
+        && data.raceId >= 1
         && data.name is string
         && data.name.size() >= 1
         && data.name.size() <= 20
@@ -37,42 +50,78 @@ service cloud.firestore {
       allow get: if roomId.matches('^[A-Z0-9]{6}$');
       allow list: if false;
       allow create: if roomId.matches('^[A-Z0-9]{6}$')
-        && request.resource.data.keys().hasOnly(['hostId', 'createdAt', 'raceStarted'])
-        && request.resource.data.keys().hasAll(['hostId', 'createdAt', 'raceStarted'])
-        && request.resource.data.hostId.matches('^[a-f0-9]{32}$')
+        && validRoom(request.resource.data)
         && request.resource.data.createdAt == request.time
-        && request.resource.data.raceStarted is bool
-        && !request.resource.data.raceStarted;
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['raceStarted'])
-        && request.resource.data.keys().hasOnly(['hostId', 'createdAt', 'raceStarted'])
-        && request.resource.data.keys().hasAll(['hostId', 'createdAt', 'raceStarted'])
+        && request.resource.data.raceId == 1
+        && !request.resource.data.raceStarted
+        && request.resource.data.countdownEndsAt == null;
+      allow update: if validRoom(request.resource.data)
         && request.resource.data.hostId == resource.data.hostId
         && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.raceStarted is bool
-        && ((!resource.data.keys().hasAny(['raceStarted']) && !request.resource.data.raceStarted)
-          || (!resource.data.get('raceStarted', false) && request.resource.data.raceStarted));
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['raceId', 'raceStarted', 'countdownEndsAt'])
+        && (
+          // Start a five second countdown for the current round.
+          (request.resource.data.raceId == resource.data.get('raceId', 1)
+            && !resource.data.get('raceStarted', false)
+            && !request.resource.data.raceStarted
+            && resource.data.get('countdownEndsAt', null) == null
+            && request.resource.data.countdownEndsAt is timestamp
+            && request.resource.data.countdownEndsAt > request.time
+            && request.resource.data.countdownEndsAt <= request.time + duration.value(10, 's'))
+          // Mark the race as running once the shared deadline has passed.
+          || (request.resource.data.raceId == resource.data.get('raceId', 1)
+            && !resource.data.get('raceStarted', false)
+            && request.resource.data.raceStarted
+            && resource.data.get('countdownEndsAt', null) is timestamp
+            && resource.data.countdownEndsAt <= request.time
+            && request.resource.data.countdownEndsAt == resource.data.countdownEndsAt)
+          // A legacy room can receive the new round fields when a player joins.
+          || (!resource.data.keys().hasAny(['raceId'])
+            && request.resource.data.raceId == 1
+            && request.resource.data.raceStarted == resource.data.get('raceStarted', false)
+            && request.resource.data.countdownEndsAt == null)
+          // Reset progress and open a new round for a rematch.
+          || (request.resource.data.raceId == resource.data.get('raceId', 1) + 1
+            && !request.resource.data.raceStarted
+            && request.resource.data.countdownEndsAt == null)
+        );
       allow delete: if false;
 
       match /players/{playerId} {
         allow get, list: if true;
         allow create: if validPlayer(request.resource.data, playerId)
-          && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.hostId is string;
+          && request.resource.data.raceId == getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.get('raceId', 1);
         allow update: if validPlayer(request.resource.data, playerId)
           && request.resource.data.bestDistance >= resource.data.bestDistance
-          && (!request.resource.data.ready
-            || resource.data.get('ready', false)
-            || !get(/databases/$(database)/documents/rooms/$(roomId)).data.get('raceStarted', false))
           && (
-            (resource.data.get('raceFinished', false)
-              && request.resource.data.raceFinished
-              && request.resource.data.finishedAt == resource.data.get('finishedAt', null))
-            || (!resource.data.get('raceFinished', false)
+            // Normal presence and race progress updates stay in the current round.
+            (request.resource.data.raceId == getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.raceId
+              && (request.resource.data.raceId == resource.data.get('raceId', 0)
+                || !resource.data.keys().hasAny(['raceId']))
+              && (
+                (resource.data.get('raceFinished', false)
+                  && request.resource.data.raceFinished
+                  && request.resource.data.finishedAt == resource.data.get('finishedAt', null))
+                || (!resource.data.get('raceFinished', false)
+                  && !request.resource.data.raceFinished
+                  && request.resource.data.finishedAt == null)
+                || (!resource.data.get('raceFinished', false)
+                  && request.resource.data.raceFinished
+                  && request.resource.data.laps == 3
+                  && request.resource.data.finishedAt == request.time)
+              ))
+            // All player progress is reset atomically with the room's new round id.
+            || (request.resource.data.raceId == resource.data.get('raceId', 0) + 1
+              && request.resource.data.raceId == getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.raceId
+              && !getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.raceStarted
+              && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.countdownEndsAt == null
+              && !request.resource.data.playing
+              && !request.resource.data.ready
+              && request.resource.data.x == 0
+              && request.resource.data.distance == 0
+              && request.resource.data.laps == 0
               && !request.resource.data.raceFinished
               && request.resource.data.finishedAt == null)
-            || (!resource.data.get('raceFinished', false)
-              && request.resource.data.raceFinished
-              && request.resource.data.laps == 3
-              && request.resource.data.finishedAt == request.time)
           );
         allow delete: if false;
       }

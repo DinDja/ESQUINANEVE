@@ -90,10 +90,16 @@
   .leaderboard .player-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .leaderboard .player-distance{font-family:'Russo One',sans-serif;color:var(--ice)}
   .leaderboard .player-live{margin-left:8px;color:var(--good);font-size:10px;font-weight:700;letter-spacing:.12em}
+  .leaderboard .player-host{color:var(--accent-2)}
   .leaderboard li:first-child .player-place,.leaderboard li:first-child .player-distance{color:var(--accent-2)}
   .room-buttons{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}
   .room-play{font-size:16px;padding:13px 24px}
   .room-result{max-width:520px;margin:0 auto 18px;color:var(--ice);font-size:16px}
+  .race-countdown{position:fixed;inset:0;z-index:25;display:grid;place-items:center;background:radial-gradient(circle,rgba(4,22,40,.38),rgba(4,15,28,.72));pointer-events:none}
+  .race-countdown-card{min-width:min(240px,70vw);padding:24px 38px;border:1px solid rgba(191,233,255,.4);border-radius:24px;background:linear-gradient(145deg,rgba(13,37,64,.88),rgba(6,18,31,.9));box-shadow:0 18px 70px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.15);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+  .race-countdown-label{color:var(--ice);font-size:13px;font-weight:700;letter-spacing:.28em;text-transform:uppercase}
+  .race-countdown-number{font-family:'Russo One',sans-serif;font-size:clamp(76px,18vw,150px);line-height:1.1;color:var(--accent-2);text-shadow:0 0 38px rgba(255,210,61,.48);animation:countdown-pop .55s ease both}
+  @keyframes countdown-pop{from{opacity:.2;transform:scale(1.35)}to{opacity:1;transform:scale(1)}}
   [hidden]{display:none!important}
 
   .gameover-stats{display:flex;gap:32px;margin:18px 0 30px}
@@ -147,6 +153,9 @@
 
 <div class="hint" id="hint" style="display:none">A/D ou Mouse para mover • Espaço para impulso</div>
 <div class="toast" id="toast"></div>
+<div class="race-countdown" id="raceCountdown" hidden aria-live="assertive" aria-atomic="true">
+  <div class="race-countdown-card"><div class="race-countdown-label">Prepare-se</div><div class="race-countdown-number" id="raceCountdownNumber">5</div></div>
+</div>
 
 <div class="overlay" id="menu">
   <h1 class="title">DOWNHILL<br>RUSH 3D</h1>
@@ -162,7 +171,7 @@
   <button class="btn" id="startBtn">Iniciar Descida</button>
   <section class="online-card" id="onlineControls" aria-labelledby="onlineTitle">
     <h2 id="onlineTitle">Competição online</h2>
-    <p class="online-copy">Crie uma sala ou entre com um código. Complete 3 voltas: quem cruzar a chegada primeiro vence.</p>
+    <p class="online-copy">Crie uma sala ou entre com um código. O host dá a largada após a contagem de 5 segundos. Complete 3 voltas para vencer.</p>
     <input class="online-input online-name" id="playerName" type="text" maxlength="20" autocomplete="nickname" placeholder="Seu nome na pista" aria-label="Seu nome na pista">
     <div class="online-actions">
       <button class="room-action" id="createRoomBtn" type="button" disabled>Criar sala</button>
@@ -184,7 +193,8 @@
     <p class="room-status" id="roomStatus" role="status" aria-live="polite">Carregando participantes…</p>
     <ol class="leaderboard" id="roomLeaderboard" aria-label="Classificação da corrida de 3 voltas"></ol>
     <div class="room-buttons">
-      <button class="btn room-play" id="roomPlayBtn" type="button">Estou pronto para correr</button>
+      <button class="btn room-play" id="roomPlayBtn" type="button">Iniciar corrida</button>
+      <button class="small-btn" id="roomReplayBtn" type="button" hidden>Repetir corrida</button>
       <button class="small-btn" id="leaveRoomBtn" type="button">Sair da sala</button>
     </div>
   </section>
@@ -199,6 +209,7 @@
   </div>
   <button class="btn" id="restartBtn">Descer Novamente</button>
   <p class="room-result" id="roomResult" hidden></p>
+  <button class="btn room-play" id="replayGameoverBtn" type="button" hidden>Repetir corrida</button>
   <button class="small-btn" id="roomLobbyBtn" type="button" hidden>Voltar à sala</button>
 </div>
 
@@ -228,24 +239,27 @@ const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 // --- Scene & Camera ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fc4e8);
-scene.fog = new THREE.Fog(0x9ccbf0, 40, 140);
+scene.fog = new THREE.Fog(0x9ccbf0, 55, 190);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 300);
 camera.position.set(0, 6, 12);
 camera.lookAt(0, 0, 0);
 
 // --- Lights ---
-const ambientLight = new THREE.AmbientLight(0x9ccbf0, 0.6);
+const ambientLight = new THREE.AmbientLight(0x9ccbf0, 0.72);
 scene.add(ambientLight);
 
-const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
-sunLight.position.set(30, 50, 20);
+const sunLight = new THREE.DirectionalLight(0xfff3db, 1.55);
+sunLight.position.set(-24, 54, 16);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.width = 2048;
 sunLight.shadow.mapSize.height = 2048;
@@ -323,7 +337,7 @@ function courseHeadingAt(distance) {
 }
 
 const game = {
-  time:0, speed:0.4, maxSpeed:1.6, score:0, distance:0, laps:0, raceFinished:false,
+  time:0, speed:0.58, maxSpeed:2.05, score:0, distance:0, laps:0, raceFinished:false,
   boost:0, boostActive:false, shake:0,
   spawnTimer:0, gateTimer:0, starTimer:0, difficultyTimer:0,
 };
@@ -594,7 +608,7 @@ for(let i=0; i<TRACK_SEGMENTS; i++) {
   trackIndices.push(left, left + 1, nextLeft, left + 1, nextLeft + 1, nextLeft);
 }
 trackGeometry.setIndex(trackIndices);
-const track = new THREE.Mesh(trackGeometry, new THREE.MeshStandardMaterial({ color:0x9bbdd6, roughness:0.92, metalness:0.04 }));
+const track = new THREE.Mesh(trackGeometry, new THREE.MeshStandardMaterial({ color:0xb8d7eb, roughness:0.84, metalness:0.015, side:THREE.DoubleSide }));
 track.frustumCulled = false;
 scene.add(track);
 
@@ -608,6 +622,28 @@ function createTrackEdge() {
 }
 
 const trackEdges = [createTrackEdge(), createTrackEdge()];
+const trackMarkers = [];
+const markerMaterials = [
+  new THREE.MeshStandardMaterial({ color:0x35c4ff, emissive:0x07516b, emissiveIntensity:0.55, roughness:0.38 }),
+  new THREE.MeshStandardMaterial({ color:0xff795b, emissive:0x6b1c17, emissiveIntensity:0.42, roughness:0.42 })
+];
+for(let sideIndex=0; sideIndex<2; sideIndex++) {
+  const side = sideIndex === 0 ? -1 : 1;
+  for(let i=0; i<15; i++) {
+    const marker = new THREE.Group();
+    const material = markerMaterials[(i + sideIndex) % markerMaterials.length];
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.065, 1.15, 7), new THREE.MeshStandardMaterial({ color:0xf3f8fc, roughness:0.78 }));
+    pole.position.y = 0.58;
+    const flag = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.06), material);
+    flag.position.set(side * -0.2, 1.02, 0);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.095, 8, 6), material);
+    cap.position.y = 1.22;
+    marker.add(pole, flag, cap);
+    marker.traverse(function(object){ if(object.isMesh) object.castShadow = true; });
+    scene.add(marker);
+    trackMarkers.push({ mesh:marker, side:side, index:i });
+  }
+}
 const finishStripe = new THREE.Mesh(
   new THREE.BoxGeometry(TRACK_HALF_WIDTH * 2, 0.12, 0.7),
   new THREE.MeshStandardMaterial({ color:0x3dff9a, emissive:0x17683d, emissiveIntensity:0.45, roughness:0.5 })
@@ -654,6 +690,15 @@ function updateTrackVisuals() {
   trackGeometry.attributes.position.needsUpdate = true;
   trackGeometry.computeVertexNormals();
   for(const edge of trackEdges) edge.geometry.attributes.position.needsUpdate = true;
+  for(const marker of trackMarkers) {
+    const progress = 8 + marker.index * 10.2;
+    const markerDistance = game.distance + progress;
+    const z = -progress;
+    const center = courseCenterAt(markerDistance) - currentCenter;
+    const side = marker.side;
+    marker.mesh.position.set(center + side * (TRACK_HALF_WIDTH + 1.15), terrainHeightAt(z), z);
+    marker.mesh.rotation.y = -courseHeadingAt(markerDistance);
+  }
 }
 
 updateTrackVisuals();
@@ -820,7 +865,7 @@ function resetGame() {
   skierMotion.rotation.set(0, 0, 0);
   skierMotion.position.y = 0;
   
-  game.time = 0; game.speed = 0.4; game.score = 0; game.distance = 0; game.laps = 0; game.raceFinished = false;
+  game.time = 0; game.speed = 0.58; game.score = 0; game.distance = 0; game.laps = 0; game.raceFinished = false;
   game.boost = 0; game.boostActive = false; game.shake = 0;
   game.spawnTimer = 0; game.gateTimer = 1.5; game.starTimer = 2; game.difficultyTimer = 0;
   document.getElementById('lapVal').textContent = '0/' + RACE_LAPS;
@@ -835,11 +880,11 @@ function update(dt) {
   
   if(game.difficultyTimer > 1.5) {
     game.difficultyTimer = 0;
-    if(game.speed < game.maxSpeed) game.speed += 0.02;
+    if(game.speed < game.maxSpeed) game.speed = Math.min(game.maxSpeed, game.speed + 0.035);
   }
   
   let currentSpeed = game.speed;
-  if(game.boostActive) currentSpeed *= 2.2;
+  if(game.boostActive) currentSpeed *= 2.4;
   let worldDelta = currentSpeed * dt * 60;
   if(activeRoom) worldDelta = Math.min(worldDelta, Math.max(0, RACE_DISTANCE - game.distance));
 
@@ -1082,7 +1127,7 @@ function hitObstacle() {
   game.shake = 1.5;
   if(activeRoom) {
     player.invuln = 1.2;
-    game.speed = Math.max(0.4, game.speed - 0.25);
+    game.speed = Math.max(0.55, game.speed - 0.25);
     game.boost = 0;
     game.boostActive = false;
     whoosh(false);
@@ -1095,31 +1140,30 @@ function hitObstacle() {
 // --- Game Flow ---
 function startGame(synchronizedRace=false) {
   if(activeRoom && synchronizedRace && state !== STATE.MENU) return;
+  if(activeRoom && synchronizedRace && roomCountdownReadyRaceId !== roomRaceId) return;
+  if(activeRoom && !synchronizedRace) {
+    if(activeRoom.hostId === playerId) startRoomCountdown();
+    else document.getElementById('roomStatus').textContent = 'Somente o host pode iniciar a corrida.';
+    return;
+  }
   const currentRoomProfile = activeRoom && roomPlayers.find(function(profile){ return profile.uid === playerId; });
   if(activeRoom && getRoomWinner(roomPlayers)) {
     document.getElementById('roomStatus').textContent = 'A corrida já terminou. Confira o vencedor na classificação.';
-    return;
-  }
-  if(activeRoom && roomRaceStarted && !synchronizedRace) {
-    document.getElementById('roomStatus').textContent = 'A corrida já começou. Aguarde o resultado.';
     return;
   }
   if(isRoomPlayerFinished(currentRoomProfile)) {
     document.getElementById('roomStatus').textContent = 'Você já concluiu esta corrida. Confira o vencedor na classificação.';
     return;
   }
-  if(activeRoom && !synchronizedRace) {
-    toggleRoomReady();
-    return;
-  }
   initAudio();
   resetGame();
-  roomRaceStarting = false;
+  document.getElementById('raceCountdown').hidden = true;
   state = STATE.PLAYING;
   publishRoomPresence(true, 0);
   lastRoomResult = null;
   document.getElementById('roomResult').hidden = true;
   document.getElementById('roomLobbyBtn').hidden = true;
+  document.getElementById('replayGameoverBtn').hidden = true;
   document.getElementById('restartBtn').hidden = Boolean(activeRoom);
   document.getElementById('gameoverTitle').textContent = 'FIM DE PISTA';
   document.getElementById('lapStat').style.display = activeRoom ? 'block' : 'none';
@@ -1248,8 +1292,12 @@ let roomPresenceLastSentAt = 0;
 let roomPresenceInFlight = false;
 let roomPresencePromise = Promise.resolve();
 let queuedRoomPresence = null;
-let roomRaceStarting = false;
 let roomRaceStarted = false;
+let roomRaceId = 1;
+let roomCountdownDeadline = null;
+let roomCountdownEndsAtMs = null;
+let roomCountdownTimer = null;
+let roomCountdownReadyRaceId = null;
 const remoteSkiers = new Map();
 
 function createRemoteSkier(uid, name) {
@@ -1499,13 +1547,13 @@ function isRoomPlayerLive(profile) {
 }
 
 function isRoomPlayerPresent(profile) {
-  if(!profile || typeof profile.ready !== 'boolean') return false;
+  if(!profile || typeof profile.ready !== 'boolean' || (Number.isInteger(profile.raceId) && profile.raceId !== roomRaceId)) return false;
   const updatedAt = profile.updatedAt && typeof profile.updatedAt.toMillis === 'function' ? profile.updatedAt.toMillis() : 0;
   return Boolean(updatedAt && Date.now() - updatedAt <= 3500);
 }
 
 function isRoomPlayerFinished(profile) {
-  return Boolean(profile && profile.raceFinished && Number(profile.laps) >= RACE_LAPS && profile.finishedAt);
+  return Boolean(profile && profile.raceId === roomRaceId && profile.raceFinished && Number(profile.laps) >= RACE_LAPS && profile.finishedAt);
 }
 
 function compareFinishTimes(a, b) {
@@ -1514,75 +1562,156 @@ function compareFinishTimes(a, b) {
 }
 
 function getRoomWinner(players) {
-  return players.filter(isRoomPlayerFinished).sort(function(a, b) {
+  return players.filter(function(player){ return Number.isInteger(player.raceId) && player.raceId === roomRaceId && isRoomPlayerFinished(player); }).sort(function(a, b) {
     return compareFinishTimes(a, b);
   })[0] || null;
 }
 
-function maybeStartRoomRace() {
-  if(!activeRoom || state !== STATE.MENU || roomRaceStarting || roomRaceStarted || getRoomWinner(roomPlayers)) return;
-  const presentPlayers = roomPlayers.filter(isRoomPlayerPresent);
-  if(presentPlayers.length < 2 || presentPlayers.some(function(profile){ return !profile.ready; })) return;
-  roomRaceStarting = true;
-  const roomCode = activeRoom.code;
-  document.getElementById('roomStatus').textContent = 'Todos prontos! A largada sincronizada está começando…';
-  const roomRef = onlineSdk.doc(onlineSdk.db, 'rooms', roomCode);
-  onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
-    const roomSnapshot = await transaction.get(roomRef);
-    if(!roomSnapshot.exists()) throw new Error('A sala não existe mais.');
-    if(!roomSnapshot.data().raceStarted) transaction.update(roomRef, { raceStarted:true });
-    return true;
-  }).then(function(started) {
-    roomRaceStarting = false;
-    if(!started || !activeRoom || activeRoom.code !== roomCode) return;
-    roomRaceStarted = true;
-    const ownProfile = roomPlayers.find(function(profile){ return profile.uid === playerId; });
-    if(state === STATE.MENU && ownProfile && ownProfile.ready) startGame(true);
-  }).catch(function(error) {
-    roomRaceStarting = false;
-    document.getElementById('roomStatus').textContent = describeOnlineError(error);
-  });
+function timestampMillis(value) {
+  return value && typeof value.toMillis === 'function' ? value.toMillis() : null;
 }
 
-async function toggleRoomReady() {
+function stopRoomCountdown() {
+  if(roomCountdownTimer !== null) window.clearInterval(roomCountdownTimer);
+  roomCountdownTimer = null;
+  roomCountdownDeadline = null;
+  document.getElementById('raceCountdown').hidden = true;
+}
+
+function commitRoomRaceStarted(roomCode, raceId) {
+  if(!activeRoom || activeRoom.code !== roomCode || activeRoom.hostId !== playerId) return;
+  const roomRef = onlineSdk.doc(onlineSdk.db, 'rooms', roomCode);
+  onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
+    const snapshot = await transaction.get(roomRef);
+    if(!snapshot.exists()) return;
+    const room = snapshot.data();
+    if(room.hostId !== playerId || room.raceId !== raceId || room.raceStarted) return;
+    const endsAt = timestampMillis(room.countdownEndsAt);
+    if(endsAt === null || endsAt > Date.now()) return;
+    transaction.update(roomRef, { raceStarted:true });
+  }).catch(function(error){ console.warn('Não foi possível atualizar o estado da largada.', error); });
+}
+
+function tickRoomCountdown() {
+  if(!activeRoom || roomCountdownDeadline === null) return;
+  const remaining = roomCountdownDeadline - Date.now();
+  const number = document.getElementById('raceCountdownNumber');
+  const value = Math.ceil(remaining / 1000);
+  const text = value > 0 ? String(value) : 'VAI!';
+  if(number.textContent !== text) {
+    number.textContent = text;
+    number.style.animation = 'none';
+    void number.offsetWidth;
+    number.style.animation = '';
+    beep(value <= 1 ? 880 : 560, 0.12, 'triangle', 0.2);
+  }
+  if(remaining > 0) return;
+  const code = activeRoom.code;
+  const raceId = roomRaceId;
+  stopRoomCountdown();
+  window.setTimeout(function() {
+    if(!activeRoom || activeRoom.code !== code || roomRaceId !== raceId || state !== STATE.MENU || getRoomWinner(roomPlayers)) return;
+    document.getElementById('raceCountdownNumber').textContent = 'VAI!';
+    roomCountdownReadyRaceId = raceId;
+    startGame(true);
+    roomCountdownReadyRaceId = null;
+    commitRoomRaceStarted(code, raceId);
+  }, 160);
+}
+
+function showRoomCountdown(timestamp) {
+  const deadline = timestampMillis(timestamp);
+  if(deadline === null || !activeRoom || roomRaceStarted) return;
+  if(roomCountdownDeadline === deadline) return;
+  stopRoomCountdown();
+  roomCountdownDeadline = deadline;
+  initAudio();
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('hud').style.display = 'flex';
+  document.getElementById('boostWrap').style.display = 'block';
+  document.getElementById('raceCountdown').hidden = false;
+  document.getElementById('raceCountdownNumber').textContent = '5';
+  roomCountdownTimer = window.setInterval(tickRoomCountdown, 80);
+  tickRoomCountdown();
+}
+
+async function startRoomCountdown() {
   if(!activeRoom || !onlineSdk || !playerId) return;
-  const ownProfile = roomPlayers.find(function(profile){ return profile.uid === playerId; });
-  if(!ownProfile) {
-    document.getElementById('roomStatus').textContent = 'Carregando sua presença na sala…';
+  if(activeRoom.hostId !== playerId) {
+    document.getElementById('roomStatus').textContent = 'Somente o host pode iniciar a corrida.';
     return;
   }
-  if(roomRaceStarted || getRoomWinner(roomPlayers) || isRoomPlayerFinished(ownProfile)) return;
-  if(!ownProfile.ready) initAudio();
+  const ownProfile = roomPlayers.find(function(profile){ return profile.uid === playerId && isRoomPlayerPresent(profile); });
+  if(!ownProfile) {
+    document.getElementById('roomStatus').textContent = 'Aguarde sua presença aparecer na sala antes de iniciar.';
+    return;
+  }
+  const roomCode = activeRoom.code;
+  const raceId = roomRaceId;
+  const roomRef = onlineSdk.doc(onlineSdk.db, 'rooms', roomCode);
   try {
-    await onlineSdk.updateDoc(playerDocument(activeRoom.code, playerId), {
-      ready:!ownProfile.ready,
-      updatedAt:onlineSdk.serverTimestamp()
+    const started = await onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
+      const roomSnapshot = await transaction.get(roomRef);
+      if(!roomSnapshot.exists()) throw new Error('A sala não existe mais.');
+      const room = roomSnapshot.data();
+      if(room.hostId !== playerId) throw new Error('Somente o host pode iniciar a corrida.');
+      if(room.raceId !== raceId || room.raceStarted || timestampMillis(room.countdownEndsAt) !== null) return false;
+      transaction.update(roomRef, { countdownEndsAt:onlineSdk.Timestamp.fromMillis(Date.now() + 5000) });
+      return true;
     });
+    if(!started) return;
+    initAudio();
   } catch(error) {
     document.getElementById('roomStatus').textContent = describeOnlineError(error);
   }
 }
 
-function enterOnlineRoom(code, hostId, raceStarted=false) {
+function enterOnlineRoom(code, hostId, initialState={}) {
   if(roomUnsubscribe) roomUnsubscribe();
   if(roomStateUnsubscribe) roomStateUnsubscribe();
   activeRoom = { code:code, hostId:hostId };
   roomPlayers = [];
   lastRoomResult = null;
   roomPresenceLastSentAt = Date.now();
-  roomRaceStarting = false;
-  roomRaceStarted = Boolean(raceStarted);
+  roomRaceId = Number.isInteger(initialState.raceId) ? initialState.raceId : 1;
+  roomRaceStarted = Boolean(initialState.raceStarted);
+  roomCountdownEndsAtMs = timestampMillis(initialState.countdownEndsAt);
+  stopRoomCountdown();
   document.getElementById('onlineControls').hidden = true;
   document.getElementById('roomPanel').hidden = false;
   document.getElementById('startBtn').hidden = true;
   document.getElementById('roomPlayBtn').disabled = true;
   document.getElementById('roomCodeDisplay').textContent = code;
-  document.getElementById('roomStatus').textContent = 'Compartilhe o código e complete 3 voltas. Quem cruzar a chegada primeiro vence.';
+  document.getElementById('roomStatus').textContent = 'Compartilhe o código. O host inicia a corrida após a contagem de 5 segundos.';
   document.getElementById('roomLeaderboard').textContent = '';
   const roomRef = onlineSdk.doc(onlineSdk.db, 'rooms', code);
   roomStateUnsubscribe = onlineSdk.onSnapshot(roomRef, function(snapshot) {
     if(!snapshot.exists()) return;
-    roomRaceStarted = Boolean(snapshot.data().raceStarted);
+    const roomData = snapshot.data();
+    const nextRaceId = Number.isInteger(roomData.raceId) ? roomData.raceId : 1;
+    if(nextRaceId !== roomRaceId) {
+      roomRaceId = nextRaceId;
+      lastRoomResult = null;
+      roomCountdownEndsAtMs = null;
+      stopRoomCountdown();
+      roomCountdownReadyRaceId = null;
+      game.distance = 0;
+      game.laps = 0;
+      game.raceFinished = false;
+      resetGame();
+      if(state !== STATE.MENU) {
+        state = STATE.MENU;
+        document.getElementById('gameover').classList.add('hidden');
+        document.getElementById('menu').classList.remove('hidden');
+        document.getElementById('hud').style.display = 'none';
+        document.getElementById('boostWrap').style.display = 'none';
+      }
+      document.getElementById('roomResult').hidden = true;
+    }
+    roomRaceStarted = Boolean(roomData.raceStarted);
+    roomCountdownEndsAtMs = timestampMillis(roomData.countdownEndsAt);
+    if(!roomRaceStarted && roomData.countdownEndsAt) showRoomCountdown(roomData.countdownEndsAt);
+    else if(roomRaceStarted && roomCountdownDeadline === null) stopRoomCountdown();
     renderRoomLeaderboard();
   }, function(error) {
     document.getElementById('roomStatus').textContent = describeOnlineError(error);
@@ -1592,7 +1721,7 @@ function enterOnlineRoom(code, hostId, raceStarted=false) {
     onlineSdk.orderBy('bestDistance', 'desc')
   );
   roomUnsubscribe = onlineSdk.onSnapshot(playersQuery, function(snapshot) {
-    roomPlayers = snapshot.docs.map(function(playerDoc){ return playerDoc.data(); });
+    roomPlayers = snapshot.docs.map(function(playerDoc){ return Object.assign({ uid:playerDoc.id }, playerDoc.data()); });
     renderRoomLeaderboard();
     const winner = getRoomWinner(roomPlayers);
     if(winner && winner.uid !== playerId && state === STATE.PLAYING && activeRoom) endGame(false);
@@ -1619,20 +1748,30 @@ function renderRoomLeaderboard() {
   });
   const winner = getRoomWinner(rankedPlayers);
   const presentPlayers = rankedPlayers.filter(isRoomPlayerPresent);
-  const readyCount = presentPlayers.filter(function(profile){ return profile.ready; }).length;
+  const isHost = Boolean(activeRoom && activeRoom.hostId === playerId);
+  const countdownActive = roomCountdownEndsAtMs !== null && roomCountdownEndsAtMs > Date.now();
+  const countdownQueued = roomCountdownEndsAtMs !== null;
   list.textContent = '';
   status.textContent = winner
     ? (winner.name || 'Um esquiador') + ' venceu ao completar as 3 voltas.'
     : roomRaceStarted
       ? 'A corrida começou. Acompanhe as voltas dos esquiadores.'
-      : roomRaceStarting
-      ? 'Todos prontos! A largada sincronizada está começando…'
+      : countdownActive
+      ? 'Largada em ' + Math.max(1, Math.ceil((roomCountdownEndsAtMs - Date.now()) / 1000)) + ' segundos.'
+      : countdownQueued
+      ? 'A largada sincronizada está começando…'
       : presentPlayers.length < 2
-        ? 'Aguardando outro esquiador para a largada.'
-        : readyCount + '/' + presentPlayers.length + ' esquiadores prontos. Quando todos confirmarem, a corrida começa.';
+        ? (isHost ? 'Convide os outros esquiadores e inicie quando quiser.' : 'Aguardando o host iniciar a corrida.')
+        : (isHost ? 'Você é o host. Inicie a corrida quando quiser.' : 'Aguardando o host iniciar a corrida.');
   const ownProfile = rankedPlayers.find(function(player){ return player.uid === playerId; });
-  document.getElementById('roomPlayBtn').disabled = !ownProfile || roomRaceStarted || Boolean(winner) || isRoomPlayerFinished(ownProfile);
-  document.getElementById('roomPlayBtn').textContent = winner ? 'Corrida encerrada' : isRoomPlayerFinished(ownProfile) ? 'Você concluiu' : roomRaceStarted ? 'Corrida em andamento' : ownProfile && ownProfile.ready ? 'Cancelar prontidão' : 'Estou pronto para correr';
+  const startButton = document.getElementById('roomPlayBtn');
+  startButton.hidden = !isHost || Boolean(winner);
+  startButton.disabled = !ownProfile || !isRoomPlayerPresent(ownProfile) || roomRaceStarted || countdownQueued;
+  startButton.textContent = countdownQueued ? 'Largada em andamento' : roomRaceStarted ? 'Corrida em andamento' : 'Iniciar corrida';
+  document.getElementById('roomReplayBtn').hidden = !isHost || !winner;
+  document.getElementById('roomReplayBtn').disabled = !winner || !isHost;
+  document.getElementById('replayGameoverBtn').hidden = !activeRoom || !winner || !isHost;
+  document.getElementById('replayGameoverBtn').disabled = !winner || !isHost;
   rankedPlayers.forEach(function(player, index) {
     const row = document.createElement('li');
     const place = document.createElement('span');
@@ -1646,13 +1785,19 @@ function renderRoomLeaderboard() {
     distance.className = 'player-distance';
     place.textContent = String(index + 1).padStart(2, '0');
     name.textContent = player.name || 'Esquiador';
-    if(live || finished || (present && player.ready) || (winner && present)) {
+    if(activeRoom && player.uid === activeRoom.hostId) {
+      const hostBadge = document.createElement('small');
+      hostBadge.className = 'player-live player-host';
+      hostBadge.textContent = 'HOST';
+      name.appendChild(hostBadge);
+    }
+    if(live || finished || (winner && present)) {
       const badge = document.createElement('small');
       badge.className = 'player-live';
-      badge.textContent = finished ? (winner && winner.uid === player.uid ? 'VENCEDOR' : 'CHEGOU') : winner ? 'PAROU' : live ? 'AO VIVO' : 'PRONTO';
+      badge.textContent = finished ? (winner && winner.uid === player.uid ? 'VENCEDOR' : 'CHEGOU') : winner ? 'PAROU' : live ? 'AO VIVO' : 'NA SALA';
       name.appendChild(badge);
     }
-    distance.textContent = finished ? RACE_LAPS + '/' + RACE_LAPS + ' voltas' : live || (winner && Number(player.distance) > 0) ? Math.min(RACE_LAPS, Number(player.laps) || 0) + '/' + RACE_LAPS + ' voltas' : player.ready && present ? 'Pronto' : 'Aguardando';
+    distance.textContent = finished ? RACE_LAPS + '/' + RACE_LAPS + ' voltas' : live || (winner && Number(player.distance) > 0) ? Math.min(RACE_LAPS, Number(player.laps) || 0) + '/' + RACE_LAPS + ' voltas' : present ? 'Na sala' : 'Aguardando';
     row.append(place, name, distance);
     list.appendChild(row);
   });
@@ -1663,11 +1808,52 @@ function renderRoomLeaderboard() {
       ? (winner.uid === playerId ? 'Você venceu a corrida!' : (winner.name || 'Um esquiador') + ' venceu a corrida.') + ' Sua distância: ' + lastRoomResult + 'm.' + standing
       : 'Sua distância: ' + lastRoomResult + 'm. Aguarde alguém completar as 3 voltas.';
   }
-  if(roomRaceStarted && state === STATE.MENU && ownProfile && ownProfile.ready && !winner) {
-    startGame(true);
+  if(state === STATE.GAMEOVER && activeRoom) document.getElementById('roomLobbyBtn').hidden = false;
+}
+
+async function repeatRoomRace() {
+  if(!activeRoom || !onlineSdk || !playerId || activeRoom.hostId !== playerId) return;
+  const winner = getRoomWinner(roomPlayers);
+  if(!winner) {
+    document.getElementById('roomStatus').textContent = 'A revanche fica disponível depois que alguém vencer.';
     return;
   }
-  maybeStartRoomRace();
+  const room = activeRoom;
+  const roomRef = onlineSdk.doc(onlineSdk.db, 'rooms', room.code);
+  const playerRefs = Array.from(new Set(roomPlayers.map(function(profile){ return profile.uid; })).values()).map(function(uid){ return playerDocument(room.code, uid); });
+  try {
+    await onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
+      const roomSnapshot = await transaction.get(roomRef);
+      if(!roomSnapshot.exists()) throw new Error('A sala não existe mais.');
+      const roomData = roomSnapshot.data();
+      if(roomData.hostId !== playerId || roomData.raceId !== roomRaceId || !getRoomWinner(roomPlayers)) throw new Error('Somente o host pode abrir a revanche depois do resultado.');
+      const playerSnapshots = [];
+      for(const playerRef of playerRefs) playerSnapshots.push(await transaction.get(playerRef));
+      const nextRaceId = roomRaceId + 1;
+      transaction.update(roomRef, { raceId:nextRaceId, raceStarted:false, countdownEndsAt:null });
+      for(const playerSnapshot of playerSnapshots) {
+        if(!playerSnapshot.exists()) continue;
+        transaction.update(playerSnapshot.ref, {
+          raceId:nextRaceId,
+          playing:false,
+          ready:false,
+          x:0,
+          distance:0,
+          laps:0,
+          raceFinished:false,
+          finishedAt:null,
+          updatedAt:onlineSdk.serverTimestamp()
+        });
+      }
+    });
+    lastRoomResult = null;
+    stopRoomCountdown();
+    resetGame();
+    returnToRoom();
+    document.getElementById('roomResult').hidden = true;
+  } catch(error) {
+    document.getElementById('roomStatus').textContent = describeOnlineError(error);
+  }
 }
 
 async function createOnlineRoom() {
@@ -1680,9 +1866,10 @@ async function createOnlineRoom() {
     const created = await onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
       const roomSnapshot = await transaction.get(roomRef);
       if(roomSnapshot.exists()) return false;
-      transaction.set(roomRef, { hostId:playerId, createdAt:onlineSdk.serverTimestamp(), raceStarted:false });
+      transaction.set(roomRef, { hostId:playerId, createdAt:onlineSdk.serverTimestamp(), raceId:1, raceStarted:false, countdownEndsAt:null });
       transaction.set(playerRef, {
         uid:playerId,
+        raceId:1,
         name:name,
         bestDistance:0,
         bestScore:0,
@@ -1698,7 +1885,7 @@ async function createOnlineRoom() {
       return true;
     });
     if(created) {
-      enterOnlineRoom(code, playerId, false);
+      enterOnlineRoom(code, playerId, { raceId:1, raceStarted:false, countdownEndsAt:null });
       return;
     }
   }
@@ -1715,15 +1902,22 @@ async function joinOnlineRoom() {
     const room = await transaction.get(roomRef);
     if(!room.exists()) throw new Error('Essa sala não existe. Confira o código e tente novamente.');
     const roomData = room.data();
+    const raceId = Number.isInteger(roomData.raceId) ? roomData.raceId : 1;
+    const raceStarted = roomData.raceStarted === true;
+    const countdownEndsAt = roomData.countdownEndsAt || null;
     const player = await transaction.get(playerRef);
     if(player.exists()) {
       const existing = player.data();
-      const existingFinish = existing.raceFinished === true && Number(existing.laps) >= RACE_LAPS && existing.finishedAt;
+      const sameRace = !Number.isInteger(existing.raceId) || existing.raceId === raceId;
+      const existingFinish = sameRace && existing.raceFinished === true && Number(existing.laps) >= RACE_LAPS && existing.finishedAt;
       transaction.update(playerRef, {
+        raceId:raceId,
         name:getPlayerName(),
         playing:false,
         ready:false,
-        laps:existingFinish ? RACE_LAPS : (Number.isInteger(existing.laps) ? existing.laps : 0),
+        x:sameRace ? (Number(existing.x) || 0) : 0,
+        distance:sameRace ? (Number(existing.distance) || 0) : 0,
+        laps:existingFinish ? RACE_LAPS : sameRace ? (Number.isInteger(existing.laps) ? existing.laps : 0) : 0,
         raceFinished:Boolean(existingFinish),
         finishedAt:existingFinish ? existing.finishedAt : null,
         updatedAt:onlineSdk.serverTimestamp()
@@ -1731,6 +1925,7 @@ async function joinOnlineRoom() {
     } else {
       transaction.set(playerRef, {
         uid:playerId,
+        raceId:raceId,
         name:getPlayerName(),
         bestDistance:0,
         bestScore:0,
@@ -1744,15 +1939,22 @@ async function joinOnlineRoom() {
         updatedAt:onlineSdk.serverTimestamp()
       });
     }
-    if(typeof roomData.raceStarted !== 'boolean') transaction.update(roomRef, { raceStarted:false });
-    return { hostId:roomData.hostId, raceStarted:roomData.raceStarted === true };
+    if(!Number.isInteger(roomData.raceId) || !Object.prototype.hasOwnProperty.call(roomData, 'countdownEndsAt') || typeof roomData.raceStarted !== 'boolean') {
+      transaction.update(roomRef, {
+        raceId:raceId,
+        raceStarted,
+        countdownEndsAt:countdownEndsAt
+      });
+    }
+    return { hostId:roomData.hostId, raceId:raceId, raceStarted:raceStarted, countdownEndsAt:countdownEndsAt };
   });
-  enterOnlineRoom(code, roomSnapshot.hostId, roomSnapshot.raceStarted);
+  enterOnlineRoom(code, roomSnapshot.hostId, roomSnapshot);
 }
 
 async function publishRoomResult(distance, score, finishedRace) {
   if(!activeRoom || !onlineSdk || !playerId) return;
   const room = activeRoom;
+  const roomRef = onlineSdk.doc(onlineSdk.db, 'rooms', room.code);
   const playerRef = playerDocument(room.code, playerId);
   const resultLaps = game.laps;
   const resultX = Math.round(player.x * 100) / 100;
@@ -1765,7 +1967,9 @@ async function publishRoomResult(distance, score, finishedRace) {
     queuedRoomPresence = null;
     if(!finishedRace) await roomPresencePromise.catch(function(){});
     await onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
+      const roomSnapshot = await transaction.get(roomRef);
       const playerSnapshot = await transaction.get(playerRef);
+      if(!roomSnapshot.exists() || roomSnapshot.data().raceId !== roomRaceId) throw new Error('A corrida mudou de rodada antes de registrar seu resultado.');
       if(!playerSnapshot.exists()) throw new Error('Você saiu da sala antes do fim da descida.');
       const previous = playerSnapshot.data();
       const result = {
@@ -1808,8 +2012,10 @@ function leaveOnlineRoom() {
   roomStateUnsubscribe = null;
   activeRoom = null;
   roomPlayers = [];
-  roomRaceStarting = false;
   roomRaceStarted = false;
+  roomRaceId = 1;
+  roomCountdownEndsAtMs = null;
+  stopRoomCountdown();
   game.distance = 0;
   game.laps = 0;
   game.raceFinished = false;
@@ -1854,7 +2060,9 @@ try {
 
 document.getElementById('createRoomBtn').addEventListener('click', function(){ runRoomAction(createOnlineRoom); });
 document.getElementById('joinRoomBtn').addEventListener('click', function(){ runRoomAction(joinOnlineRoom); });
-document.getElementById('roomPlayBtn').addEventListener('click', startGame);
+document.getElementById('roomPlayBtn').addEventListener('click', startRoomCountdown);
+document.getElementById('roomReplayBtn').addEventListener('click', repeatRoomRace);
+document.getElementById('replayGameoverBtn').addEventListener('click', repeatRoomRace);
 document.getElementById('leaveRoomBtn').addEventListener('click', leaveOnlineRoom);
 document.getElementById('copyRoomBtn').addEventListener('click', copyRoomCode);
 document.getElementById('roomLobbyBtn').addEventListener('click', returnToRoom);
