@@ -110,11 +110,11 @@ service cloud.firestore {
                   && request.resource.data.laps == 3
                   && request.resource.data.finishedAt == request.time)
               ))
-            // All player progress is reset atomically with the room's new round id.
+            // Each player resets their progress after the room opens the next round.
             || (request.resource.data.raceId == resource.data.get('raceId', 0) + 1
-              && request.resource.data.raceId == getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.raceId
-              && !getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.raceStarted
-              && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.countdownEndsAt == null
+              && request.resource.data.raceId == get(/databases/$(database)/documents/rooms/$(roomId)).data.raceId
+              && !get(/databases/$(database)/documents/rooms/$(roomId)).data.raceStarted
+              && get(/databases/$(database)/documents/rooms/$(roomId)).data.countdownEndsAt == null
               && !request.resource.data.playing
               && !request.resource.data.ready
               && request.resource.data.x == 0
