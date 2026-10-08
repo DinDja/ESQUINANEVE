@@ -134,6 +134,7 @@
     <div class="stat score"><div class="label">Pontos</div><div class="value" id="scoreVal">0</div></div>
     <div class="hud-top-right">
       <div class="stat"><div class="label">Distância</div><div class="value" id="distVal">0m</div></div>
+      <div class="stat" id="lapStat" style="display:none"><div class="label">Voltas</div><div class="value" id="lapVal">0/3</div></div>
       <div class="stat speed"><div class="label">Velocidade</div><div class="value" id="speedVal">0</div></div>
     </div>
   </div>
@@ -150,7 +151,7 @@
 <div class="overlay" id="menu">
   <h1 class="title">DOWNHILL<br>RUSH 3D</h1>
   <div class="subtitle">Esqui Extremo</div>
-  <p class="desc">Desça a montanha gelada em 3D! Desvie de árvores e pedras, passe pelos portões azuis para somar pontos e colete estrelas para ativar o impulso turbo.</p>
+  <p class="desc">Desça uma pista sinuosa em 3D! Desvie de árvores e pedras, passe pelos portões azuis para somar pontos e colete estrelas para ativar o impulso turbo.</p>
   <div class="controls-grid">
     <div class="ctrl"><div class="keys">A / ←</div><div class="desc-small">Esquerda</div></div>
     <div class="ctrl"><div class="keys">D / →</div><div class="desc-small">Direita</div></div>
@@ -161,7 +162,7 @@
   <button class="btn" id="startBtn">Iniciar Descida</button>
   <section class="online-card" id="onlineControls" aria-labelledby="onlineTitle">
     <h2 id="onlineTitle">Competição online</h2>
-    <p class="online-copy">Crie uma sala ou entre com um código. Desçam juntos e vejam quem vai mais longe.</p>
+    <p class="online-copy">Crie uma sala ou entre com um código. Complete 3 voltas: quem cruzar a chegada primeiro vence.</p>
     <input class="online-input online-name" id="playerName" type="text" maxlength="20" autocomplete="nickname" placeholder="Seu nome na pista" aria-label="Seu nome na pista">
     <div class="online-actions">
       <button class="room-action" id="createRoomBtn" type="button" disabled>Criar sala</button>
@@ -181,16 +182,16 @@
       </div>
     </div>
     <p class="room-status" id="roomStatus" role="status" aria-live="polite">Carregando participantes…</p>
-    <ol class="leaderboard" id="roomLeaderboard" aria-label="Classificação por distância"></ol>
+    <ol class="leaderboard" id="roomLeaderboard" aria-label="Classificação da corrida de 3 voltas"></ol>
     <div class="room-buttons">
-      <button class="btn room-play" id="roomPlayBtn" type="button">Esquiar nesta sala</button>
+      <button class="btn room-play" id="roomPlayBtn" type="button">Estou pronto para correr</button>
       <button class="small-btn" id="leaveRoomBtn" type="button">Sair da sala</button>
     </div>
   </section>
 </div>
 
 <div class="overlay hidden" id="gameover">
-  <h1 class="title" style="font-size:clamp(36px,7vw,68px)">FIM DE PISTA</h1>
+  <h1 class="title" id="gameoverTitle" style="font-size:clamp(36px,7vw,68px)">FIM DE PISTA</h1>
   <div class="gameover-stats">
     <div class="go-stat"><div class="go-label">Pontuação</div><div class="go-value" id="finalScore">0</div><div class="new-record" id="recordTag" style="display:none">Novo Recorde!</div></div>
     <div class="go-stat"><div class="go-label">Distância</div><div class="go-value" id="finalDist" style="color:var(--ice)">0m</div></div>
@@ -307,9 +308,22 @@ function crashSound(){
 const STATE = { MENU:'menu', PLAYING:'playing', GAMEOVER:'gameover', PAUSED:'paused' };
 let state = STATE.MENU;
 let bestScore = safeGetBest();
+const RACE_LAPS = 3;
+const LAP_DISTANCE = 400;
+const RACE_DISTANCE = RACE_LAPS * LAP_DISTANCE;
+const TRACK_HALF_WIDTH = 10;
+
+function courseCenterAt(distance) {
+  const phase = (distance / LAP_DISTANCE) * Math.PI * 2;
+  return Math.sin(phase) * 6 + Math.sin(phase * 2 + 0.65) * 2;
+}
+
+function courseHeadingAt(distance) {
+  return Math.atan((courseCenterAt(distance + 1) - courseCenterAt(distance - 1)) / 2);
+}
 
 const game = {
-  time:0, speed:0.4, maxSpeed:1.6, score:0, distance:0,
+  time:0, speed:0.4, maxSpeed:1.6, score:0, distance:0, laps:0, raceFinished:false,
   boost:0, boostActive:false, shake:0,
   spawnTimer:0, gateTimer:0, starTimer:0, difficultyTimer:0,
 };
@@ -567,6 +581,83 @@ function terrainPitchAt(worldZ) {
   return Math.atan((terrainHeightAt(worldZ + 1) - terrainHeightAt(worldZ - 1)) / 2);
 }
 
+const TRACK_SEGMENTS = 90;
+const TRACK_BEHIND = 18;
+const TRACK_AHEAD = 160;
+const trackGeometry = new THREE.BufferGeometry();
+const trackPositions = new Float32Array((TRACK_SEGMENTS + 1) * 2 * 3);
+trackGeometry.setAttribute('position', new THREE.BufferAttribute(trackPositions, 3));
+const trackIndices = [];
+for(let i=0; i<TRACK_SEGMENTS; i++) {
+  const left = i * 2;
+  const nextLeft = left + 2;
+  trackIndices.push(left, left + 1, nextLeft, left + 1, nextLeft + 1, nextLeft);
+}
+trackGeometry.setIndex(trackIndices);
+const track = new THREE.Mesh(trackGeometry, new THREE.MeshStandardMaterial({ color:0x9bbdd6, roughness:0.92, metalness:0.04 }));
+track.frustumCulled = false;
+scene.add(track);
+
+function createTrackEdge() {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array((TRACK_SEGMENTS + 1) * 3), 3));
+  const edge = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color:0x527c99, transparent:true, opacity:0.85 }));
+  edge.frustumCulled = false;
+  scene.add(edge);
+  return edge;
+}
+
+const trackEdges = [createTrackEdge(), createTrackEdge()];
+const finishStripe = new THREE.Mesh(
+  new THREE.BoxGeometry(TRACK_HALF_WIDTH * 2, 0.12, 0.7),
+  new THREE.MeshStandardMaterial({ color:0x3dff9a, emissive:0x17683d, emissiveIntensity:0.45, roughness:0.5 })
+);
+finishStripe.visible = false;
+scene.add(finishStripe);
+
+function updateFinishStripe() {
+  if(!activeRoom) {
+    finishStripe.visible = false;
+    return;
+  }
+  const finishDistance = game.distance >= RACE_DISTANCE ? RACE_DISTANCE : (Math.floor(game.distance / LAP_DISTANCE) + 1) * LAP_DISTANCE;
+  const ahead = finishDistance - game.distance;
+  const z = -ahead;
+  finishStripe.position.set(courseCenterAt(finishDistance) - courseCenterAt(game.distance), terrainHeightAt(z) + 0.12, z);
+  finishStripe.rotation.y = -courseHeadingAt(finishDistance);
+  finishStripe.visible = ahead <= TRACK_AHEAD;
+}
+
+function updateTrackVisuals() {
+  const currentCenter = courseCenterAt(game.distance);
+  for(let i=0; i<=TRACK_SEGMENTS; i++) {
+    const progress = -TRACK_BEHIND + (TRACK_AHEAD + TRACK_BEHIND) * i / TRACK_SEGMENTS;
+    const z = -progress;
+    const center = courseCenterAt(game.distance + progress) - currentCenter;
+    const y = terrainHeightAt(z) + 0.06;
+    const leftIndex = i * 2 * 3;
+    const rightIndex = leftIndex + 3;
+    trackPositions[leftIndex] = center - TRACK_HALF_WIDTH;
+    trackPositions[leftIndex + 1] = y;
+    trackPositions[leftIndex + 2] = z;
+    trackPositions[rightIndex] = center + TRACK_HALF_WIDTH;
+    trackPositions[rightIndex + 1] = y;
+    trackPositions[rightIndex + 2] = z;
+    for(let edgeIndex=0; edgeIndex<trackEdges.length; edgeIndex++) {
+      const edgePositions = trackEdges[edgeIndex].geometry.attributes.position.array;
+      const edgePositionIndex = i * 3;
+      edgePositions[edgePositionIndex] = center + (edgeIndex === 0 ? -TRACK_HALF_WIDTH : TRACK_HALF_WIDTH);
+      edgePositions[edgePositionIndex + 1] = y + 0.025;
+      edgePositions[edgePositionIndex + 2] = z;
+    }
+  }
+  trackGeometry.attributes.position.needsUpdate = true;
+  trackGeometry.computeVertexNormals();
+  for(const edge of trackEdges) edge.geometry.attributes.position.needsUpdate = true;
+}
+
+updateTrackVisuals();
+
 // --- World: Background Mountains ---
 function createMountains() {
   const mtnGroup = new THREE.Group();
@@ -729,9 +820,12 @@ function resetGame() {
   skierMotion.rotation.set(0, 0, 0);
   skierMotion.position.y = 0;
   
-  game.time = 0; game.speed = 0.4; game.score = 0; game.distance = 0;
+  game.time = 0; game.speed = 0.4; game.score = 0; game.distance = 0; game.laps = 0; game.raceFinished = false;
   game.boost = 0; game.boostActive = false; game.shake = 0;
   game.spawnTimer = 0; game.gateTimer = 1.5; game.starTimer = 2; game.difficultyTimer = 0;
+  document.getElementById('lapVal').textContent = '0/' + RACE_LAPS;
+  updateTrackVisuals();
+  updateFinishStripe();
 }
 
 // --- Update ---
@@ -746,14 +840,25 @@ function update(dt) {
   
   let currentSpeed = game.speed;
   if(game.boostActive) currentSpeed *= 2.2;
-  const worldDelta = currentSpeed * dt * 60;
+  let worldDelta = currentSpeed * dt * 60;
+  if(activeRoom) worldDelta = Math.min(worldDelta, Math.max(0, RACE_DISTANCE - game.distance));
 
   // The terrain profile repeats every 200m, so the loop stays seamless.
   ground.position.z += worldDelta;
   if(ground.position.z > 50) ground.position.z -= 200;
   
   game.distance += worldDelta;
+  const previousLaps = game.laps;
+  game.laps = activeRoom ? Math.min(RACE_LAPS, Math.floor(game.distance / LAP_DISTANCE)) : 0;
+  const raceComplete = Boolean(activeRoom && game.distance >= RACE_DISTANCE);
+  if(raceComplete) {
+    game.distance = RACE_DISTANCE;
+    game.laps = RACE_LAPS;
+  }
+  if(game.laps > previousLaps) showToast(game.laps + '/' + RACE_LAPS + ' VOLTAS', '#3dff9a');
   game.score += worldDelta * 0.5;
+  updateTrackVisuals();
+  updateFinishStripe();
   
   // Movement
   const accel = 26;
@@ -782,7 +887,7 @@ function update(dt) {
   const targetTilt = (player.vx / maxVx) * 0.55;
   player.tilt += (targetTilt - player.tilt) * (1 - Math.exp(-8 * dt));
   skier.rotation.z = -player.tilt * 0.7;
-  skier.rotation.y = SKIER_FORWARD_ROTATION + player.tilt * 0.55;
+  skier.rotation.y = SKIER_FORWARD_ROTATION + player.tilt * 0.55 - courseHeadingAt(game.distance);
   
   if(player.invuln > 0) player.invuln -= dt;
   
@@ -822,7 +927,9 @@ function update(dt) {
     const o = obstacles[i];
     o.z += worldDelta;
     o.mesh.position.z = o.z;
+    o.mesh.position.x = o.x + courseCenterAt(game.distance - o.z) - courseCenterAt(game.distance);
     o.mesh.position.y = terrainHeightAt(o.z) + o.yOffset;
+    o.mesh.rotation.y = -courseHeadingAt(game.distance - o.z);
     
     // Collision check (only when close)
     if(o.z > -2 && o.z < 2 && player.invuln <= 0) {
@@ -843,7 +950,9 @@ function update(dt) {
     const g = gates[i];
     g.z += worldDelta;
     g.mesh.position.z = g.z;
+    g.mesh.position.x = g.x + courseCenterAt(game.distance - g.z) - courseCenterAt(game.distance);
     g.mesh.position.y = terrainHeightAt(g.z);
+    g.mesh.rotation.y = -courseHeadingAt(game.distance - g.z);
     
     if(!g.passed && g.z > 0.5) {
       g.passed = true;
@@ -875,6 +984,7 @@ function update(dt) {
     s.z += worldDelta;
     s.t += dt;
     s.mesh.position.z = s.z;
+    s.mesh.position.x = s.x + courseCenterAt(game.distance - s.z) - courseCenterAt(game.distance);
     s.mesh.position.y = terrainHeightAt(s.z) + 1.5 + Math.sin(s.t * 4) * 0.3;
     s.mesh.rotation.y += dt * 3;
     s.mesh.rotation.x += dt * 2;
@@ -954,28 +1064,65 @@ function update(dt) {
   // Update HUD
   document.getElementById('scoreVal').textContent = Math.floor(game.score);
   document.getElementById('distVal').textContent = Math.floor(game.distance) + 'm';
+  document.getElementById('lapVal').textContent = game.laps + '/' + RACE_LAPS;
   document.getElementById('speedVal').textContent = Math.floor(currentSpeed * 100);
   document.getElementById('boostFill').style.width = game.boost + '%';
   document.getElementById('boostTxt').textContent = Math.floor(game.boost) + '%';
-  syncRoomPresence(dt);
+  if(raceComplete) {
+    game.raceFinished = true;
+    endGame(true);
+    return;
+  }
+  syncRoomPresence();
 }
 
 function hitObstacle() {
   if(!player.alive) return;
   crashSound();
   game.shake = 1.5;
+  if(activeRoom) {
+    player.invuln = 1.2;
+    game.speed = Math.max(0.4, game.speed - 0.25);
+    game.boost = 0;
+    game.boostActive = false;
+    whoosh(false);
+    showToast('TROMBOU! VELOCIDADE REDUZIDA', '#ff9aae');
+    return;
+  }
   endGame();
 }
 
 // --- Game Flow ---
-function startGame() {
+function startGame(synchronizedRace=false) {
+  if(activeRoom && synchronizedRace && state !== STATE.MENU) return;
+  const currentRoomProfile = activeRoom && roomPlayers.find(function(profile){ return profile.uid === playerId; });
+  if(activeRoom && getRoomWinner(roomPlayers)) {
+    document.getElementById('roomStatus').textContent = 'A corrida já terminou. Confira o vencedor na classificação.';
+    return;
+  }
+  if(activeRoom && roomRaceStarted && !synchronizedRace) {
+    document.getElementById('roomStatus').textContent = 'A corrida já começou. Aguarde o resultado.';
+    return;
+  }
+  if(isRoomPlayerFinished(currentRoomProfile)) {
+    document.getElementById('roomStatus').textContent = 'Você já concluiu esta corrida. Confira o vencedor na classificação.';
+    return;
+  }
+  if(activeRoom && !synchronizedRace) {
+    toggleRoomReady();
+    return;
+  }
   initAudio();
   resetGame();
+  roomRaceStarting = false;
   state = STATE.PLAYING;
   publishRoomPresence(true, 0);
   lastRoomResult = null;
   document.getElementById('roomResult').hidden = true;
   document.getElementById('roomLobbyBtn').hidden = true;
+  document.getElementById('restartBtn').hidden = Boolean(activeRoom);
+  document.getElementById('gameoverTitle').textContent = 'FIM DE PISTA';
+  document.getElementById('lapStat').style.display = activeRoom ? 'block' : 'none';
   
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('gameover').classList.add('hidden');
@@ -987,9 +1134,10 @@ function startGame() {
   setTimeout(function(){ hint.style.display = 'none'; }, 4000);
 }
 
-function endGame() {
+function endGame(finishedRace=false) {
   state = STATE.GAMEOVER;
   player.alive = false;
+  if(activeRoom) game.raceFinished = Boolean(finishedRace);
   
   const finalScore = Math.floor(game.score);
   const finalDist = Math.floor(game.distance);
@@ -1007,12 +1155,16 @@ function endGame() {
   document.getElementById('bestScore').textContent = bestScore;
 
   if(activeRoom) {
+    document.getElementById('gameoverTitle').textContent = finishedRace ? '3 VOLTAS COMPLETADAS' : 'CORRIDA ENCERRADA';
     document.getElementById('roomResult').hidden = false;
     document.getElementById('roomLobbyBtn').hidden = false;
-    publishRoomResult(finalDist, finalScore);
+    document.getElementById('restartBtn').hidden = true;
+    publishRoomResult(finalDist, finalScore, Boolean(finishedRace));
   } else {
+    document.getElementById('gameoverTitle').textContent = 'FIM DE PISTA';
     document.getElementById('roomResult').hidden = true;
     document.getElementById('roomLobbyBtn').hidden = true;
+    document.getElementById('restartBtn').hidden = false;
   }
   
   setTimeout(function(){
@@ -1052,6 +1204,7 @@ function animate() {
   if(state === STATE.PLAYING) {
     update(dt);
   } else {
+    if(activeRoom) syncRoomPresence();
     // Idle camera rotation for menu
     if(state === STATE.MENU) {
       camera.position.x = Math.sin(now * 0.0002) * 3;
@@ -1088,12 +1241,15 @@ let onlineSdk = null;
 let playerId = null;
 let activeRoom = null;
 let roomUnsubscribe = null;
+let roomStateUnsubscribe = null;
 let roomPlayers = [];
 let lastRoomResult = null;
-let roomPresenceElapsed = 0;
+let roomPresenceLastSentAt = 0;
 let roomPresenceInFlight = false;
 let roomPresencePromise = Promise.resolve();
 let queuedRoomPresence = null;
+let roomRaceStarting = false;
+let roomRaceStarted = false;
 const remoteSkiers = new Map();
 
 function createRemoteSkier(uid, name) {
@@ -1199,7 +1355,8 @@ function updateRemoteSkiers(dt) {
       const skier = remoteSkiers.get(profile.uid) || createRemoteSkier(profile.uid, profile.name);
       const currentDistance = Number(profile.distance) || 0;
       const relativeZ = THREE.MathUtils.clamp((game.distance - currentDistance) * 0.13, -14, 8);
-      const targetX = THREE.MathUtils.clamp(Number(profile.x) || 0, -8, 8);
+      const curveOffset = courseCenterAt(currentDistance) - courseCenterAt(game.distance);
+      const targetX = THREE.MathUtils.clamp((Number(profile.x) || 0) + curveOffset, -16, 16);
       const lateralError = targetX - skier.position.x;
       const blend = Math.min(1, dt * 8);
       skier.visible = true;
@@ -1207,6 +1364,7 @@ function updateRemoteSkiers(dt) {
       skier.position.z += (relativeZ - skier.position.z) * blend;
       skier.position.y = terrainHeightAt(skier.position.z);
       skier.rotation.x = terrainPitchAt(skier.position.z);
+      skier.rotation.y = SKIER_FORWARD_ROTATION - courseHeadingAt(currentDistance);
       skier.rotation.z = -lateralError * 0.04;
       skier.userData.phase += dt * 7;
       skier.userData.rig.rotation.z = Math.sin(skier.userData.phase) * 0.055;
@@ -1280,12 +1438,16 @@ function playerDocument(code, uid) {
 
 function writeRoomPresence(request) {
   roomPresenceInFlight = true;
-  roomPresencePromise = onlineSdk.updateDoc(playerDocument(request.code, request.uid), {
+  const profile = {
     playing:request.playing,
     x:request.x,
     distance:request.distance,
+    laps:request.laps,
+    raceFinished:request.raceFinished,
     updatedAt:onlineSdk.serverTimestamp()
-  }).catch(function(error) {
+  };
+  if(request.ready !== undefined) profile.ready = request.ready;
+  roomPresencePromise = onlineSdk.updateDoc(playerDocument(request.code, request.uid), profile).catch(function(error) {
     console.warn('Não foi possível sincronizar a posição da sala.', error);
   }).finally(function() {
     roomPresenceInFlight = false;
@@ -1298,15 +1460,19 @@ function writeRoomPresence(request) {
   return roomPresencePromise;
 }
 
-function publishRoomPresence(playing, distance) {
+function publishRoomPresence(playing, distance, clearReady=false) {
   if(!activeRoom || !onlineSdk || !playerId) return Promise.resolve();
+  roomPresenceLastSentAt = Date.now();
   const request = {
     code:activeRoom.code,
     uid:playerId,
     playing:playing,
     x:Math.round(player.x * 100) / 100,
-    distance:Math.floor(distance === undefined ? game.distance : distance)
+    distance:Math.floor(distance === undefined ? game.distance : distance),
+    laps:game.laps,
+    raceFinished:game.raceFinished
   };
+  if(clearReady) request.ready = false;
   if(roomPresenceInFlight) {
     queuedRoomPresence = request;
     return roomPresencePromise;
@@ -1314,35 +1480,113 @@ function publishRoomPresence(playing, distance) {
   return writeRoomPresence(request);
 }
 
-function syncRoomPresence(dt) {
-  if(!activeRoom || state !== STATE.PLAYING) {
-    roomPresenceElapsed = 0;
+function syncRoomPresence() {
+  if(!activeRoom) {
+    roomPresenceLastSentAt = 0;
     return;
   }
-  roomPresenceElapsed += dt;
-  if(roomPresenceElapsed >= 0.5) {
-    roomPresenceElapsed = 0;
-    publishRoomPresence(true);
+  const now = Date.now();
+  const interval = state === STATE.PLAYING ? 500 : 1000;
+  if(now - roomPresenceLastSentAt >= interval) {
+    roomPresenceLastSentAt = now;
+    publishRoomPresence(state === STATE.PLAYING);
   }
 }
 
 function isRoomPlayerLive(profile) {
   const updatedAt = profile.updatedAt && typeof profile.updatedAt.toMillis === 'function' ? profile.updatedAt.toMillis() : 0;
-  return Boolean(profile.playing && updatedAt && Date.now() - updatedAt <= 3500);
+  return Boolean(profile.playing && isRoomPlayerPresent(profile) && updatedAt);
 }
 
-function enterOnlineRoom(code, hostId) {
+function isRoomPlayerPresent(profile) {
+  if(!profile || typeof profile.ready !== 'boolean') return false;
+  const updatedAt = profile.updatedAt && typeof profile.updatedAt.toMillis === 'function' ? profile.updatedAt.toMillis() : 0;
+  return Boolean(updatedAt && Date.now() - updatedAt <= 3500);
+}
+
+function isRoomPlayerFinished(profile) {
+  return Boolean(profile && profile.raceFinished && Number(profile.laps) >= RACE_LAPS && profile.finishedAt);
+}
+
+function compareFinishTimes(a, b) {
+  if(a.finishedAt.seconds !== b.finishedAt.seconds) return a.finishedAt.seconds - b.finishedAt.seconds;
+  return a.finishedAt.nanoseconds - b.finishedAt.nanoseconds;
+}
+
+function getRoomWinner(players) {
+  return players.filter(isRoomPlayerFinished).sort(function(a, b) {
+    return compareFinishTimes(a, b);
+  })[0] || null;
+}
+
+function maybeStartRoomRace() {
+  if(!activeRoom || state !== STATE.MENU || roomRaceStarting || roomRaceStarted || getRoomWinner(roomPlayers)) return;
+  const presentPlayers = roomPlayers.filter(isRoomPlayerPresent);
+  if(presentPlayers.length < 2 || presentPlayers.some(function(profile){ return !profile.ready; })) return;
+  roomRaceStarting = true;
+  const roomCode = activeRoom.code;
+  document.getElementById('roomStatus').textContent = 'Todos prontos! A largada sincronizada está começando…';
+  const roomRef = onlineSdk.doc(onlineSdk.db, 'rooms', roomCode);
+  onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
+    const roomSnapshot = await transaction.get(roomRef);
+    if(!roomSnapshot.exists()) throw new Error('A sala não existe mais.');
+    if(!roomSnapshot.data().raceStarted) transaction.update(roomRef, { raceStarted:true });
+    return true;
+  }).then(function(started) {
+    roomRaceStarting = false;
+    if(!started || !activeRoom || activeRoom.code !== roomCode) return;
+    roomRaceStarted = true;
+    const ownProfile = roomPlayers.find(function(profile){ return profile.uid === playerId; });
+    if(state === STATE.MENU && ownProfile && ownProfile.ready) startGame(true);
+  }).catch(function(error) {
+    roomRaceStarting = false;
+    document.getElementById('roomStatus').textContent = describeOnlineError(error);
+  });
+}
+
+async function toggleRoomReady() {
+  if(!activeRoom || !onlineSdk || !playerId) return;
+  const ownProfile = roomPlayers.find(function(profile){ return profile.uid === playerId; });
+  if(!ownProfile) {
+    document.getElementById('roomStatus').textContent = 'Carregando sua presença na sala…';
+    return;
+  }
+  if(roomRaceStarted || getRoomWinner(roomPlayers) || isRoomPlayerFinished(ownProfile)) return;
+  if(!ownProfile.ready) initAudio();
+  try {
+    await onlineSdk.updateDoc(playerDocument(activeRoom.code, playerId), {
+      ready:!ownProfile.ready,
+      updatedAt:onlineSdk.serverTimestamp()
+    });
+  } catch(error) {
+    document.getElementById('roomStatus').textContent = describeOnlineError(error);
+  }
+}
+
+function enterOnlineRoom(code, hostId, raceStarted=false) {
   if(roomUnsubscribe) roomUnsubscribe();
+  if(roomStateUnsubscribe) roomStateUnsubscribe();
   activeRoom = { code:code, hostId:hostId };
   roomPlayers = [];
   lastRoomResult = null;
-  roomPresenceElapsed = 0;
+  roomPresenceLastSentAt = Date.now();
+  roomRaceStarting = false;
+  roomRaceStarted = Boolean(raceStarted);
   document.getElementById('onlineControls').hidden = true;
   document.getElementById('roomPanel').hidden = false;
   document.getElementById('startBtn').hidden = true;
+  document.getElementById('roomPlayBtn').disabled = true;
   document.getElementById('roomCodeDisplay').textContent = code;
-  document.getElementById('roomStatus').textContent = 'Compartilhe o código e faça sua descida. A classificação atualiza em tempo real.';
+  document.getElementById('roomStatus').textContent = 'Compartilhe o código e complete 3 voltas. Quem cruzar a chegada primeiro vence.';
   document.getElementById('roomLeaderboard').textContent = '';
+  const roomRef = onlineSdk.doc(onlineSdk.db, 'rooms', code);
+  roomStateUnsubscribe = onlineSdk.onSnapshot(roomRef, function(snapshot) {
+    if(!snapshot.exists()) return;
+    roomRaceStarted = Boolean(snapshot.data().raceStarted);
+    renderRoomLeaderboard();
+  }, function(error) {
+    document.getElementById('roomStatus').textContent = describeOnlineError(error);
+  });
   const playersQuery = onlineSdk.query(
     onlineSdk.collection(onlineSdk.db, 'rooms', code, 'players'),
     onlineSdk.orderBy('bestDistance', 'desc')
@@ -1350,6 +1594,8 @@ function enterOnlineRoom(code, hostId) {
   roomUnsubscribe = onlineSdk.onSnapshot(playersQuery, function(snapshot) {
     roomPlayers = snapshot.docs.map(function(playerDoc){ return playerDoc.data(); });
     renderRoomLeaderboard();
+    const winner = getRoomWinner(roomPlayers);
+    if(winner && winner.uid !== playerId && state === STATE.PLAYING && activeRoom) endGame(false);
   }, function(error) {
     document.getElementById('roomStatus').textContent = describeOnlineError(error);
   });
@@ -1359,39 +1605,69 @@ function renderRoomLeaderboard() {
   const list = document.getElementById('roomLeaderboard');
   const status = document.getElementById('roomStatus');
   const rankedPlayers = roomPlayers.slice().sort(function(a, b) {
-    const aDistance = isRoomPlayerLive(a) ? (Number(a.distance) || 0) : (Number(a.bestDistance) || 0);
-    const bDistance = isRoomPlayerLive(b) ? (Number(b.distance) || 0) : (Number(b.bestDistance) || 0);
-    return bDistance - aDistance;
+    const aFinished = isRoomPlayerFinished(a);
+    const bFinished = isRoomPlayerFinished(b);
+    if(aFinished !== bFinished) return aFinished ? -1 : 1;
+    if(aFinished && bFinished) {
+      const finishOrder = compareFinishTimes(a, b);
+      if(finishOrder !== 0) return finishOrder;
+    }
+    const aLive = isRoomPlayerLive(a);
+    const bLive = isRoomPlayerLive(b);
+    if(aLive !== bLive) return aLive ? -1 : 1;
+    return (Number(b.distance) || 0) - (Number(a.distance) || 0);
   });
-  const liveCount = rankedPlayers.filter(isRoomPlayerLive).length;
+  const winner = getRoomWinner(rankedPlayers);
+  const presentPlayers = rankedPlayers.filter(isRoomPlayerPresent);
+  const readyCount = presentPlayers.filter(function(profile){ return profile.ready; }).length;
   list.textContent = '';
-  status.textContent = roomPlayers.length + (roomPlayers.length === 1 ? ' esquiador na sala; ' : ' esquiadores na sala; ') + liveCount + ' descendo agora.';
+  status.textContent = winner
+    ? (winner.name || 'Um esquiador') + ' venceu ao completar as 3 voltas.'
+    : roomRaceStarted
+      ? 'A corrida começou. Acompanhe as voltas dos esquiadores.'
+      : roomRaceStarting
+      ? 'Todos prontos! A largada sincronizada está começando…'
+      : presentPlayers.length < 2
+        ? 'Aguardando outro esquiador para a largada.'
+        : readyCount + '/' + presentPlayers.length + ' esquiadores prontos. Quando todos confirmarem, a corrida começa.';
+  const ownProfile = rankedPlayers.find(function(player){ return player.uid === playerId; });
+  document.getElementById('roomPlayBtn').disabled = !ownProfile || roomRaceStarted || Boolean(winner) || isRoomPlayerFinished(ownProfile);
+  document.getElementById('roomPlayBtn').textContent = winner ? 'Corrida encerrada' : isRoomPlayerFinished(ownProfile) ? 'Você concluiu' : roomRaceStarted ? 'Corrida em andamento' : ownProfile && ownProfile.ready ? 'Cancelar prontidão' : 'Estou pronto para correr';
   rankedPlayers.forEach(function(player, index) {
     const row = document.createElement('li');
     const place = document.createElement('span');
     const name = document.createElement('span');
     const distance = document.createElement('strong');
     const live = isRoomPlayerLive(player);
+    const present = isRoomPlayerPresent(player);
+    const finished = isRoomPlayerFinished(player);
     place.className = 'player-place';
     name.className = 'player-name';
     distance.className = 'player-distance';
     place.textContent = String(index + 1).padStart(2, '0');
     name.textContent = player.name || 'Esquiador';
-    if(live) {
+    if(live || finished || (present && player.ready) || (winner && present)) {
       const badge = document.createElement('small');
       badge.className = 'player-live';
-      badge.textContent = 'AO VIVO';
+      badge.textContent = finished ? (winner && winner.uid === player.uid ? 'VENCEDOR' : 'CHEGOU') : winner ? 'PAROU' : live ? 'AO VIVO' : 'PRONTO';
       name.appendChild(badge);
     }
-    distance.textContent = Math.floor(live ? (player.distance || 0) : (player.bestDistance || 0)) + 'm';
+    distance.textContent = finished ? RACE_LAPS + '/' + RACE_LAPS + ' voltas' : live || (winner && Number(player.distance) > 0) ? Math.min(RACE_LAPS, Number(player.laps) || 0) + '/' + RACE_LAPS + ' voltas' : player.ready && present ? 'Pronto' : 'Aguardando';
     row.append(place, name, distance);
     list.appendChild(row);
   });
   if(lastRoomResult !== null) {
     const position = rankedPlayers.findIndex(function(player){ return player.uid === playerId; });
-    const standing = position >= 0 ? ' Você está em ' + (position + 1) + 'º de ' + roomPlayers.length + '.' : '';
-    document.getElementById('roomResult').textContent = 'Sua descida: ' + lastRoomResult + 'm.' + standing + ' A sala guarda sua melhor distância.';
+    const standing = position >= 0 ? ' Posição final: ' + (position + 1) + 'º de ' + roomPlayers.length + '.' : '';
+    document.getElementById('roomResult').textContent = winner
+      ? (winner.uid === playerId ? 'Você venceu a corrida!' : (winner.name || 'Um esquiador') + ' venceu a corrida.') + ' Sua distância: ' + lastRoomResult + 'm.' + standing
+      : 'Sua distância: ' + lastRoomResult + 'm. Aguarde alguém completar as 3 voltas.';
   }
+  if(roomRaceStarted && state === STATE.MENU && ownProfile && ownProfile.ready && !winner) {
+    startGame(true);
+    return;
+  }
+  maybeStartRoomRace();
 }
 
 async function createOnlineRoom() {
@@ -1404,7 +1680,7 @@ async function createOnlineRoom() {
     const created = await onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
       const roomSnapshot = await transaction.get(roomRef);
       if(roomSnapshot.exists()) return false;
-      transaction.set(roomRef, { hostId:playerId, createdAt:onlineSdk.serverTimestamp() });
+      transaction.set(roomRef, { hostId:playerId, createdAt:onlineSdk.serverTimestamp(), raceStarted:false });
       transaction.set(playerRef, {
         uid:playerId,
         name:name,
@@ -1413,12 +1689,16 @@ async function createOnlineRoom() {
         playing:false,
         x:0,
         distance:0,
+        laps:0,
+        ready:false,
+        raceFinished:false,
+        finishedAt:null,
         updatedAt:onlineSdk.serverTimestamp()
       });
       return true;
     });
     if(created) {
-      enterOnlineRoom(code, playerId);
+      enterOnlineRoom(code, playerId, false);
       return;
     }
   }
@@ -1434,9 +1714,20 @@ async function joinOnlineRoom() {
   const roomSnapshot = await onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
     const room = await transaction.get(roomRef);
     if(!room.exists()) throw new Error('Essa sala não existe. Confira o código e tente novamente.');
+    const roomData = room.data();
     const player = await transaction.get(playerRef);
     if(player.exists()) {
-      transaction.update(playerRef, { name:getPlayerName(), updatedAt:onlineSdk.serverTimestamp() });
+      const existing = player.data();
+      const existingFinish = existing.raceFinished === true && Number(existing.laps) >= RACE_LAPS && existing.finishedAt;
+      transaction.update(playerRef, {
+        name:getPlayerName(),
+        playing:false,
+        ready:false,
+        laps:existingFinish ? RACE_LAPS : (Number.isInteger(existing.laps) ? existing.laps : 0),
+        raceFinished:Boolean(existingFinish),
+        finishedAt:existingFinish ? existing.finishedAt : null,
+        updatedAt:onlineSdk.serverTimestamp()
+      });
     } else {
       transaction.set(playerRef, {
         uid:playerId,
@@ -1446,43 +1737,57 @@ async function joinOnlineRoom() {
         playing:false,
         x:0,
         distance:0,
+        laps:0,
+        ready:false,
+        raceFinished:false,
+        finishedAt:null,
         updatedAt:onlineSdk.serverTimestamp()
       });
     }
-    return room.data();
+    if(typeof roomData.raceStarted !== 'boolean') transaction.update(roomRef, { raceStarted:false });
+    return { hostId:roomData.hostId, raceStarted:roomData.raceStarted === true };
   });
-  enterOnlineRoom(code, roomSnapshot.hostId);
+  enterOnlineRoom(code, roomSnapshot.hostId, roomSnapshot.raceStarted);
 }
 
-async function publishRoomResult(distance, score) {
+async function publishRoomResult(distance, score, finishedRace) {
   if(!activeRoom || !onlineSdk || !playerId) return;
   const room = activeRoom;
   const playerRef = playerDocument(room.code, playerId);
+  const resultLaps = game.laps;
+  const resultX = Math.round(player.x * 100) / 100;
   lastRoomResult = distance;
   document.getElementById('roomResult').hidden = false;
-  document.getElementById('roomResult').textContent = 'Enviando sua descida de ' + distance + 'm para a sala…';
+  document.getElementById('roomResult').textContent = finishedRace
+    ? 'Registrando sua chegada após 3 voltas…'
+    : 'A corrida terminou. Registrando seu resultado…';
   try {
     queuedRoomPresence = null;
-    await roomPresencePromise.catch(function(){});
+    if(!finishedRace) await roomPresencePromise.catch(function(){});
     await onlineSdk.runTransaction(onlineSdk.db, async function(transaction) {
       const playerSnapshot = await transaction.get(playerRef);
       if(!playerSnapshot.exists()) throw new Error('Você saiu da sala antes do fim da descida.');
       const previous = playerSnapshot.data();
       const result = {
         playing:false,
-        x:Math.round(player.x * 100) / 100,
+        x:resultX,
         distance:distance,
+        laps:resultLaps,
+        raceFinished:finishedRace,
         updatedAt:onlineSdk.serverTimestamp()
       };
+      if(finishedRace) result.finishedAt = onlineSdk.serverTimestamp();
       if(distance > (previous.bestDistance || 0)) {
         result.bestDistance = distance;
         result.bestScore = score;
       }
       transaction.update(playerRef, result);
     });
-    renderRoomLeaderboard();
+    if(activeRoom && activeRoom.code === room.code) renderRoomLeaderboard();
   } catch(error) {
-    document.getElementById('roomResult').textContent = 'Não foi possível enviar o resultado: ' + describeOnlineError(error);
+    if(activeRoom && activeRoom.code === room.code) {
+      document.getElementById('roomResult').textContent = 'Não foi possível enviar o resultado: ' + describeOnlineError(error);
+    }
   }
 }
 
@@ -1496,11 +1801,21 @@ function returnToRoom() {
 }
 
 function leaveOnlineRoom() {
-  publishRoomPresence(false);
+  publishRoomPresence(false, undefined, true);
   if(roomUnsubscribe) roomUnsubscribe();
+  if(roomStateUnsubscribe) roomStateUnsubscribe();
   roomUnsubscribe = null;
+  roomStateUnsubscribe = null;
   activeRoom = null;
   roomPlayers = [];
+  roomRaceStarting = false;
+  roomRaceStarted = false;
+  game.distance = 0;
+  game.laps = 0;
+  game.raceFinished = false;
+  document.getElementById('lapVal').textContent = '0/' + RACE_LAPS;
+  updateTrackVisuals();
+  updateFinishStripe();
   document.getElementById('roomPanel').hidden = true;
   document.getElementById('onlineControls').hidden = false;
   document.getElementById('startBtn').hidden = false;

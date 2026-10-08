@@ -3,8 +3,8 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function validPlayer(data, playerId) {
-      return data.keys().hasOnly(['uid', 'name', 'bestDistance', 'bestScore', 'playing', 'x', 'distance', 'updatedAt'])
-        && data.keys().hasAll(['uid', 'name', 'bestDistance', 'bestScore', 'playing', 'x', 'distance', 'updatedAt'])
+      return data.keys().hasOnly(['uid', 'name', 'bestDistance', 'bestScore', 'playing', 'ready', 'x', 'distance', 'laps', 'raceFinished', 'finishedAt', 'updatedAt'])
+        && data.keys().hasAll(['uid', 'name', 'bestDistance', 'bestScore', 'playing', 'ready', 'x', 'distance', 'laps', 'raceFinished', 'finishedAt', 'updatedAt'])
         && data.uid == playerId
         && playerId.matches('^[a-f0-9]{32}$')
         && data.name is string
@@ -17,12 +17,19 @@ service cloud.firestore {
         && data.bestScore >= 0
         && data.bestScore <= 1000000
         && data.playing is bool
+        && data.ready is bool
         && data.x is number
         && data.x >= -8
         && data.x <= 8
         && data.distance is int
         && data.distance >= 0
         && data.distance <= 1000000
+        && data.laps is int
+        && data.laps >= 0
+        && data.laps <= 3
+        && data.raceFinished is bool
+        && ((data.raceFinished && data.laps == 3 && data.finishedAt is timestamp)
+          || (!data.raceFinished && data.finishedAt == null))
         && data.updatedAt == request.time;
     }
 
@@ -30,18 +37,43 @@ service cloud.firestore {
       allow get: if roomId.matches('^[A-Z0-9]{6}$');
       allow list: if false;
       allow create: if roomId.matches('^[A-Z0-9]{6}$')
-        && request.resource.data.keys().hasOnly(['hostId', 'createdAt'])
-        && request.resource.data.keys().hasAll(['hostId', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['hostId', 'createdAt', 'raceStarted'])
+        && request.resource.data.keys().hasAll(['hostId', 'createdAt', 'raceStarted'])
         && request.resource.data.hostId.matches('^[a-f0-9]{32}$')
-        && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.raceStarted is bool
+        && !request.resource.data.raceStarted;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['raceStarted'])
+        && request.resource.data.keys().hasOnly(['hostId', 'createdAt', 'raceStarted'])
+        && request.resource.data.keys().hasAll(['hostId', 'createdAt', 'raceStarted'])
+        && request.resource.data.hostId == resource.data.hostId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.raceStarted is bool
+        && ((!resource.data.keys().hasAny(['raceStarted']) && !request.resource.data.raceStarted)
+          || (!resource.data.get('raceStarted', false) && request.resource.data.raceStarted));
+      allow delete: if false;
 
       match /players/{playerId} {
         allow get, list: if true;
         allow create: if validPlayer(request.resource.data, playerId)
           && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.hostId is string;
         allow update: if validPlayer(request.resource.data, playerId)
-          && request.resource.data.bestDistance >= resource.data.bestDistance;
+          && request.resource.data.bestDistance >= resource.data.bestDistance
+          && (!request.resource.data.ready
+            || resource.data.get('ready', false)
+            || !get(/databases/$(database)/documents/rooms/$(roomId)).data.get('raceStarted', false))
+          && (
+            (resource.data.get('raceFinished', false)
+              && request.resource.data.raceFinished
+              && request.resource.data.finishedAt == resource.data.get('finishedAt', null))
+            || (!resource.data.get('raceFinished', false)
+              && !request.resource.data.raceFinished
+              && request.resource.data.finishedAt == null)
+            || (!resource.data.get('raceFinished', false)
+              && request.resource.data.raceFinished
+              && request.resource.data.laps == 3
+              && request.resource.data.finishedAt == request.time)
+          );
         allow delete: if false;
       }
     }
